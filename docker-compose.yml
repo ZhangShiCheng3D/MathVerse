@@ -1,0 +1,70 @@
+version: "3.8"
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - mathverse-api
+      - deeptutor
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+  mathverse-api:
+    build: ./mathverse-api
+    environment:
+      - DATABASE_URL=sqlite:///data/mathverse.db
+      - JWT_SECRET=${JWT_SECRET}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - WECHAT_APP_ID=${WECHAT_APP_ID}
+      - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
+      - WECHAT_PAY_MCH_ID=${WECHAT_PAY_MCH_ID}
+      - WECHAT_PAY_API_KEY=${WECHAT_PAY_API_KEY}
+      - DEEPTUTOR_URL=http://deeptutor:8001
+      - MATH_OCR_API_KEY=${MATH_OCR_API_KEY}
+    volumes:
+      - ./data:/app/data
+      - ./mathverse-api/knowledge-graph:/app/knowledge-graph:ro
+      - ./mathverse-api/prompts:/app/prompts:ro
+    depends_on:
+      - deeptutor
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+  deeptutor:
+    image: ghcr.io/hkuds/deeptutor:latest
+    environment:
+      - LLM_BINDING=deepseek
+      - LLM_MODEL=deepseek-chat
+      - LLM_API_KEY=${DEEPSEEK_API_KEY}
+      - LLM_HOST=https://api.deepseek.com/v1
+      - EMBEDDING_BINDING=dashscope
+      - EMBEDDING_MODEL=text-embedding-v3
+      - EMBEDDING_API_KEY=${DASHSCOPE_API_KEY}
+      - WEB_SEARCH=duckduckgo
+      - ENABLE_AUTH=false
+    volumes:
+      - ./deeptutor-data:/app/data
+      - ./qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+networks:
+  mathverse:
+    driver: bridge
