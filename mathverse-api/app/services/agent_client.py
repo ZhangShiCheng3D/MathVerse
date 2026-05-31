@@ -5,7 +5,9 @@ the circuit breaker wraps those. Legacy REST helpers (_post) remain only for the
 not-yet-migrated quiz/lecture paths — see the TODO on those methods.
 """
 import asyncio
+import json
 import logging
+import re
 import time
 import os
 from dataclasses import dataclass
@@ -15,6 +17,30 @@ from app.config import settings
 from app.services import deeptutor_ws
 
 logger = logging.getLogger(__name__)
+
+# Ask the engine to append a structured JSON block so we can rebuild the
+# three-layer (answer / steps / summary) display from a prose chat stream.
+_SOLVE_SCHEMA_HINT = (
+    "解答完成后，请在最后附一个 JSON 代码块（```json ... ```），严格使用如下结构：\n"
+    '{"answer":"最终答案","steps":[{"title":"步骤标题","content":"步骤说明","why":"为什么这样做"}],'
+    '"knowledge_points":["知识点"],"related_topics":["相关题型"],"common_mistakes":["常见错误"]}'
+)
+
+
+def _extract_json(text: str) -> dict | None:
+    """Pull the structured JSON block out of a prose answer; None if absent/invalid."""
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    candidate = fenced.group(1) if fenced else None
+    if candidate is None:
+        loose = re.search(r"\{.*\}", text, re.S)
+        candidate = loose.group(0) if loose else None
+    if candidate is None:
+        return None
+    try:
+        data = json.loads(candidate)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 @dataclass
@@ -106,19 +132,30 @@ class AgentClient:
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
 
-        The chat stream returns prose, so steps/knowledge_points are not populated here;
-        structured three-layer output is a follow-up (prompt the engine for JSON).
+        Prompts the engine to append a structured JSON block, then parses it into the
+        three-layer SolveResult. If the engine returns only prose, we degrade gracefully
+        to answer-only (steps empty).
         """
-        message = f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤：\n{question}"
+        message = (
+            f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
+            f"{_SOLVE_SCHEMA_HINT}\n\n题目：\n{question}"
+        )
         data = await self._guarded(deeptutor_ws.chat(message, mode="solve", timeout=90.0))
+        raw = data["answer"]
+        parsed = _extract_json(raw)
+        if parsed:
+            return SolveResult(
+                status="success",
+                answer=parsed.get("answer") or raw,
+                steps=parsed.get("steps", []),
+                knowledge_points=parsed.get("knowledge_points", []),
+                related_topics=parsed.get("related_topics", []),
+                common_mistakes=parsed.get("common_mistakes", []),
+                tokens_used=0,
+            )
         return SolveResult(
-            status="success",
-            answer=data["answer"],
-            steps=[],
-            knowledge_points=[],
-            related_topics=[],
-            common_mistakes=[],
-            tokens_used=0,
+            status="success", answer=raw, steps=[], knowledge_points=[],
+            related_topics=[], common_mistakes=[], tokens_used=0,
         )
 
     async def quick_solve(self, question: str, stage: str) -> str:

@@ -19,6 +19,35 @@ async def test_deep_solve_maps_answer():
 
 
 @pytest.mark.asyncio
+async def test_deep_solve_parses_structured_json():
+    client = AgentClient("http://mock:8001")
+    prose = (
+        "这是 0/0 型，用洛必达。\n"
+        '```json\n'
+        '{"answer":"-1/6","steps":[{"title":"识别","content":"0/0型","why":"洛必达条件满足"}],'
+        '"knowledge_points":["gs-1.1"],"related_topics":["洛必达"],"common_mistakes":["未验证条件"]}\n'
+        '```'
+    )
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": prose, "session_id": "s", "statuses": []}
+        result = await client.deep_solve("求极限...", "college")
+        assert result.answer == "-1/6"
+        assert len(result.steps) == 1
+        assert result.steps[0]["why"] == "洛必达条件满足"
+        assert "gs-1.1" in result.knowledge_points
+
+
+@pytest.mark.asyncio
+async def test_deep_solve_falls_back_to_prose():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "答案就是 -1/6，无结构化输出。", "session_id": "s", "statuses": []}
+        result = await client.deep_solve("求极限...", "college")
+        assert "-1/6" in result.answer
+        assert result.steps == []
+
+
+@pytest.mark.asyncio
 async def test_quick_solve_success():
     client = AgentClient("http://mock:8001")
     with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:

@@ -183,7 +183,7 @@ MathVerse 的<strong>产品定位与业务分层是对的</strong>，但<strong>
 <li><strong>会话</strong>：用引擎 <code>session_id</code> 贯穿一次解题/学习会话，落实产品设计"会话即记录"。</li>
 <li><strong>鉴权</strong>：现阶段 <code>ENABLE_AUTH=false</code> + 内网隔离；上多租户时为 WS 握手注入服务令牌（<code>ws_require_auth</code>）。</li>
 </ul>
-<div style="margin-top:10px"><span class="tag t-build">新发现</span><strong>散文 vs 结构化</strong>：<code>chat</code> WS 流回的是<strong>散文答案</strong>（<code>stream</code>/<code>result</code> 文本），并非产品设计假设的结构化 <code>{steps[], knowledge_points[]}</code>。三层展示需<strong>提示引擎按 JSON 返回再解析</strong>（在 <code>message</code> 内约定 schema），或接受散文并前端排版。此项为采用 WS 后的必做决策。</div>
+<div style="margin-top:10px"><span class="tag t-build">已发现并处理</span><strong>散文 vs 结构化</strong>：<code>chat</code> WS 流回散文，并非结构化 <code>{steps[], knowledge_points[]}</code>。<strong>已实现</strong>：<code>deep_solve</code> 在 <code>message</code> 内约定 JSON schema 让引擎附结构化块，<code>agent_client</code> 解析出三层 <code>steps</code>（解析失败则优雅回退到散文答案、<code>steps</code> 置空）。结构化质量最终取决于引擎遵从度，待真机回归。</div>
 <div style="margin-top:8px"><span class="tag t-reuse">已落地</span>本仓库已新增 <code>services/deeptutor_ws.py</code>（chat/vision/judge 三个已核实端点的 WS 客户端）+ <code>tests/test_deeptutor_ws.py</code>（用进程内真实 WS 服务器跑契约测试），并将 <code>agent_client.deep_solve/quick_solve</code> 切到 chat WS（散文答案，steps 暂空，circuit breaker 保留）。出题/讲解待 <code>question/*</code> 事件 schema 确认后迁移。</div>
 </div>
 
