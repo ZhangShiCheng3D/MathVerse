@@ -3,6 +3,7 @@
 Runs an in-process websockets server that speaks the *verified* event envelopes,
 then asserts our client connects, sends the right request, and aggregates correctly.
 """
+import asyncio
 import json
 
 import pytest
@@ -32,10 +33,12 @@ async def test_chat_aggregates_stream(monkeypatch):
             {"type": "result", "content": "答案是 -1/6"},
         ]:
             await ws.send(json.dumps(ev))
+        # DeepTutor keeps the socket open after result — client must break, not hang.
+        await asyncio.sleep(10)
 
     server = await _serve(monkeypatch, handler)
     try:
-        out = await deeptutor_ws.chat("求极限", mode="solve")
+        out = await asyncio.wait_for(deeptutor_ws.chat("求极限", mode="solve"), timeout=5)
         assert out["answer"] == "答案是 -1/6"
         assert out["session_id"] == "s1"
         assert len(out["statuses"]) == 1

@@ -21,6 +21,7 @@ Note: chat streams PROSE, not the structured {steps[], knowledge_points[]} the l
 SolveResult assumed. Structured three-layer output requires prompting the engine for JSON
 and parsing it — tracked as a follow-up (see design optimization doc).
 """
+import asyncio
 import json
 
 import websockets
@@ -42,12 +43,18 @@ def _ws_base() -> str:
 
 
 async def _stream(path: str, request: dict, timeout: float):
-    """Connect, send the request, yield each received JSON event until the socket closes."""
+    """Connect, send the request, yield each received JSON event.
+
+    DeepTutor keeps the socket open for the session after a turn, so callers MUST
+    break on their terminal event (result/done); the overall timeout is a backstop
+    so a missing terminal event can't hang the request forever.
+    """
     uri = f"{_ws_base()}{path}"
-    async with websockets.connect(uri, open_timeout=timeout, max_size=None) as ws:
+    async with websockets.connect(uri, open_timeout=min(timeout, 15), max_size=None) as ws:
         await ws.send(json.dumps(request))
-        async for raw in ws:
-            yield json.loads(raw)
+        async with asyncio.timeout(timeout):
+            async for raw in ws:
+                yield json.loads(raw)
 
 
 async def chat(message: str, mode: str = "solve", session_id: str | None = None,
@@ -69,6 +76,7 @@ async def chat(message: str, mode: str = "solve", session_id: str | None = None,
             answer += ev.get("content", "")
         elif t == "result":
             answer = ev.get("content") or answer
+            break  # terminal — DeepTutor keeps the socket open for the next turn
         elif t == "error":
             raise WSStreamError(ev.get("message") or ev.get("content") or "chat error")
     return {"answer": answer, "session_id": sid, "statuses": statuses}
