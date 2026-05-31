@@ -2,6 +2,8 @@
 
 > AI数学学习平台 · 面向中国大陆用户 · 基于 DeepTutor (Apache 2.0)
 > 版本 v2.0 · 2026-06-01
+>
+> ⚠️ **§5.1 能力映射与 §5.3 新增 AI 能力已被修订**：DeepTutor 已自带 拍照解题(vision_solver)、判分(quiz_judge)、知识库(knowledge)、记忆(memory)、Book Engine、学伴(tutorbot) 等能力，不应重复自建；OCR 改为复用 vision_solver。详见《设计系统性优化方案》(`docs/mathverse-design-optimization-20260601.html`)。
 
 ---
 

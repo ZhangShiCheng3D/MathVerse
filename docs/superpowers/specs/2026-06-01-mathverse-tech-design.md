@@ -2,6 +2,8 @@
 
 > AI数学学习平台 · 微信小程序 · 基于 DeepTutor (Apache 2.0)
 > 版本 v2.0 · 2026-06-01
+>
+> ⚠️ **§2.3 AgentClient 与 §4 集成协议已被修订**：经核实，DeepTutor 真实接口为 `/api/v1/*` + 统一 WebSocket 流式（非本文假设的 `/api/agent/*` 阻塞 POST）。以《设计系统性优化方案》(`docs/mathverse-design-optimization-20260601.html`) 为准。
 
 ---
 

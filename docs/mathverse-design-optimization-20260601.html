@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数界 MathVerse — 设计系统性优化方案（基于 DeepTutor 真实能力）</title>
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--ink:#e6e8ee;--mut:#9aa0ad;--line:#2a2e3a;
+        --p0:#ff4d4f;--p1:#ff9f40;--p2:#ffd666;--p3:#4dabf7;--ok:#52c41a;--accent:#7c9cff;--purple:#b389ff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:48px 28px 96px}
+  h1{font-size:29px;margin:0 0 4px;letter-spacing:.5px}
+  .sub{color:var(--mut);margin:0 0 28px}
+  h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px;color:var(--accent)}
+  code{background:#0a0c12;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font:12.5px/1.5 "SF Mono",Consolas,monospace;color:#c3cbe0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .card.hot{border-color:var(--p0)}
+  .card.ok{border-color:var(--ok)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#0a0c12;color:var(--mut);font-weight:600}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;color:#0f1117;margin-right:6px}
+  .t-reuse{background:var(--ok)}.t-wrap{background:var(--p3)}.t-build{background:var(--p2)}.t-fix{background:var(--p0)}
+  ul{margin:6px 0;padding-left:20px}li{margin:4px 0}
+  .lead{color:var(--mut)}
+  .bad{color:#ff8b8c}.good{color:#9be3ab}
+  .pill{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:20px;padding:1px 8px}
+  blockquote{margin:12px 0;padding:8px 14px;border-left:3px solid var(--accent);background:#12151f;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>数界 MathVerse · 设计系统性优化方案</h1>
+<p class="sub">以白标开源引擎 DeepTutor 的<strong>真实能力</strong>为基准，重审并优化 MathVerse 的产品与架构设计 · 2026-06-01</p>
+
+<div class="card">
+<b>本方案的依据</b><br>
+此前的产品/技术设计文档基于对 DeepTutor 能力的<strong>假设</strong>书写。本次通过 <code>gh</code> 直接核实了 <code>HKUDS/DeepTutor</code> 仓库 <code>deeptutor/api/main.py</code> 的真实路由注册，以及官方对其架构的描述。结论是：<strong>当前 MathVerse 与 DeepTutor 的集成契约几乎完全不成立</strong>，同时 DeepTutor 已自带多项 MathVerse 正在重复自建的能力。下面据此给出系统性优化。
+<br><br><span class="pill">已核实</span> 路由前缀、WebSocket 中心化交互、鉴权依赖、自带能力清单，<strong>以及解题/拍照/出题/仿题/判分各端点的真实路径与 WS 消息信封</strong>（见<a href="#appendix" style="color:var(--accent)">附录</a>，读自 router 源码）。
+<span class="pill">待确认</span> 仅剩 WS 流中<strong>事件级</strong>字段（如 mode 取值、event 名、增量分片格式）—— 需对照运行实例 <code>/docs</code> 与抓包最终敲定。
+</div>
+
+<h2>一、核心发现：集成契约是虚构的</h2>
+
+<div class="card hot">
+<table>
+<tr><th>维度</th><th class="bad">MathVerse <code>agent_client</code> 现假设</th><th class="good">DeepTutor 真实</th></tr>
+<tr><td>路径前缀</td><td><code>/api/agent/*</code>、<code>/api/chat</code></td><td><strong><code>/api/v1/*</code></strong>（统一版本前缀）</td></tr>
+<tr><td>交互模型</td><td>同步 <code>POST</code> + 90s 阻塞、一次性返回</td><td><strong>统一 WebSocket 流式</strong>（<code>unified_ws</code>）承载长任务；REST 只做配置/取数</td></tr>
+<tr><td>鉴权</td><td>无（视作开放 POST）</td><td>绝大多数路由 <code>dependencies=_auth</code>；docker 里靠 <code>ENABLE_AUTH=false</code> 绕过</td></tr>
+<tr><td>深度解题</td><td>自造 <code>POST /api/agent/deep-solve</code></td><td><code>WS /api/v1/chat</code>（solve 模式，流式）；拍照走 <code>WS /api/v1/vision/solve</code></td></tr>
+<tr><td>对话</td><td><code>POST /api/chat</code></td><td><code>/api/v1</code> chat + <code>unified_ws</code> 流式</td></tr>
+<tr><td>出题</td><td><code>POST /api/agent/generate-quiz</code></td><td><code>/api/v1/question</code></td></tr>
+<tr><td>判分</td><td>自建 <code>/api/solve→/exercise/grade</code> 调 DeepSeek</td><td>自带 <code>quiz_judge</code>（WebSocket AI 判分）</td></tr>
+<tr><td>动画</td><td><code>POST /api/animator/generate</code></td><td>visualize 能力（SVG/Chart.js/Mermaid/HTML/Manim），经 <code>unified_ws</code></td></tr>
+</table>
+<strong>含义：</strong>如果今天真把 DeepTutor 接上，<span class="bad">解题/讲解/出题全链路都会 404 或超时</span> —— 路径错、交互模型错（阻塞 POST vs 流式 WS）、鉴权假设错，三重错配。这是当前设计<strong>最高优先级</strong>的隐患，必须在任何 AI 功能上线前修正。
+</div>
+
+<blockquote>核实到的 DeepTutor 真实路由（节选，均在 <code>/api/v1</code> 下、多数需鉴权）：
+<code>auth</code> · <code>multi-user</code> · <code>chat</code> · <code>question</code> · <code>knowledge</code> · <code>dashboard</code> · <code>co_writer</code> · <code>notebook</code> · <code>book</code> · <code>memory</code> · <code>capabilities</code> · <code>sessions</code> · <code>question-notebook</code> · <code>settings</code> · <code>skills</code> · <code>tools</code> · <code>system</code> · <code>plugins</code> · <code>agent-config</code> · <code>vision-solver</code> · <code>tutorbot</code> · <code>attachments</code>；两个 WebSocket：<code>unified_ws</code>、<code>quiz_judge</code>。</blockquote>
+
+<h2>二、复用 / 包装 / 自建 —— 决策矩阵</h2>
+<p class="lead">白标的本质不是"包一层皮"，而是<strong>判断每项能力该复用引擎、还是该由 BFF 自建</strong>。下表是基于真实能力的重新划分。</p>
+
+<table>
+<tr><th>能力</th><th>MathVerse 现状</th><th>建议</th><th>理由</th></tr>
+<tr><td>深度解题（6-Agent）</td><td>阻塞 POST，路径错</td><td><span class="tag t-fix">改</span>走 <code>unified_ws</code> 流式直通</td><td>真实契约；6-Agent 本就是长任务，流式才有"思考中"的过程 UX</td></tr>
+<tr><td>拍照解题 / OCR</td><td>计划自建 MathPix/LaTeX-OCR</td><td><span class="tag t-reuse">复用</span> <code>vision_solver</code></td><td>引擎已内置视觉解题，省一个付费外部依赖 + 一套维护</td></tr>
+<tr><td>练习判分</td><td>自建 <code>/exercise/grade</code> 裸调 DeepSeek</td><td><span class="tag t-reuse">复用</span> <code>quiz_judge</code></td><td>引擎自带校验/判分，质量与一致性更好，少一次裸 LLM 成本</td></tr>
+<tr><td>出题</td><td>路径错</td><td><span class="tag t-fix">改</span>用 <code>/api/v1/question</code></td><td>带 auto-validation，比自造稳</td></tr>
+<tr><td>知识库 / 教材内容</td><td>静态 JSON 知识图谱 + 自管 Qdrant</td><td><span class="tag t-wrap">包装</span>课程/真题入 <code>knowledge</code> KB；KG 结构留作导航骨架</td><td>DeepTutor KB 版本化、可回滚、可比对；RAG 检索由引擎负责，Qdrant 不必自管</td></tr>
+<tr><td>记忆 / 个性化</td><td>自建 <code>LearningProgress</code></td><td><span class="tag t-build">自建</span>掌握度（业务口径）<span class="lead">+</span> <span class="tag t-wrap">包装</span>引擎 <code>memory</code> 提供对话上下文</td><td>各取所长：估分/计划用结构化掌握度；讲解/解题个性化用引擎三层记忆</td></tr>
+<tr><td>看板 / 分析</td><td>自建 progress/analytics</td><td><span class="tag t-build">自建</span>保留</td><td>业务/合规/付费口径与引擎内部 dashboard 不同，应自管</td></tr>
+<tr><td>讲解 / 学习内容</td><td>仅 lecture 文本 + Manim 动画</td><td><span class="tag t-wrap">包装</span> <code>book</code>（Book Engine）</td><td>13 种交互块（测验/闪卡/时间线/概念图/动画）→ 学习体验质变，见 §三</td></tr>
+<tr><td>AI 学伴</td><td>设计有概念，无落地</td><td><span class="tag t-wrap">包装</span> <code>tutorbot</code></td><td>持久多实例 + 多渠道在场，可对接微信服务号主动推送</td></tr>
+<tr><td>深度检索（考研/竞赛）</td><td>设计提及未用</td><td><span class="tag t-wrap">包装</span> <code>research</code></td><td>RAG/web/arXiv 并行，适合难点专题与真题溯源</td></tr>
+<tr><td>登录 / 多用户</td><td>自建 JWT + 微信 OAuth</td><td><span class="tag t-build">自建</span>保留</td><td>微信生态登录/支付/合规必须自管；DeepTutor 多用户体系不覆盖中国渠道</td></tr>
+</table>
+
+<h2>三、被忽视的高价值能力 → 用户需求映射</h2>
+<p class="lead">这些是"白标引擎已经有、但 MathVerse 设计没用上、且直接命中用户需求"的能力。</p>
+
+<h3>Book Engine → "学习"入口的体验质变</h3>
+当前"讲解 = 一段 AI 文本 + 一个 Manim 视频"。Book Engine 能把一个知识点编译成<strong>交互式学习单元</strong>：定义块 + 概念图（依赖关系可视化，正好替代手搓的知识地图局部）+ 例题块 + 即时闪卡 + 随堂测验 + 动画，全部由引擎生成与校验。用户需求"我要学这个知识点"从"读一段话"升级为"走一遍可交互的微课"。
+
+<h3>unified_ws 流式 → 解题的"过程感"与可中断</h3>
+6-Agent 深度解题耗时数十秒。阻塞 POST 下用户只能干等转圈。改走统一 WebSocket：实时回传"正在分析题型→正在求解→正在校验"的过程事件，命中产品设计里"会话即记录""零摩擦"的原则，也避免 90s 超时悬崖。MathVerse 侧 nginx 已预留 <code>/ws</code>，只需做 WS 中继与协议翻译。
+
+<h3>vision_solver → 拍照解题不必自建</h3>
+产品设计把"拍照"列为<strong>第一优先输入</strong>，却要靠自建 MathPix 集成。引擎自带 <code>vision_solver</code>，直接复用即可省一条外部依赖链与其成本/限流风险。
+
+<h3>memory(L1/L2/L3) → 真正的"懂你"</h3>
+品牌人格写着"了解你的学习"。仅靠 <code>LearningProgress</code> 的掌握度数字做不到。引擎三层记忆（按日轨迹 / 带引用的事实 / 跨场景画像）可让讲解与解题携带"你上次卡在洛必达条件""你偏好几何直觉"等上下文。建议：结构化掌握度仍自管（估分/计划需要），对话上下文交给引擎记忆。
+
+<h3>tutorbot → "AI 学伴"从口号到落地</h3>
+"三位一体"的学伴角色目前是空的。<code>tutorbot</code> 是持久、多实例、可多渠道在场的 Agent，可承载"每日学伴"，并对接<strong>微信服务号模板消息</strong>做复习提醒/打卡推送——正好接上 FSRS 调度与留存设计。
+
+<h2>四、修订后的架构原则与集成层（AgentClient v2）</h2>
+<div class="card ok">
+<ol>
+<li><strong>契约对齐</strong>：所有调用走 <code>/api/v1</code>，并<strong>版本锁定</strong>；启动时拉一次 <code>/api/v1/capabilities</code> 做能力探测与契约自检。</li>
+<li><strong>长任务流式</strong>：solve / question / research / visualize 经 <code>unified_ws</code>；MathVerse 提供自己的 <code>/ws</code>，做"引擎事件流 → 小程序事件流"的中继与裁剪。REST 仅用于 <code>knowledge</code> / <code>dashboard</code> / <code>settings</code> 等取数配置。</li>
+<li><strong>鉴权直通</strong>：DeepTutor 端点默认需鉴权。两个选项——(a) 现阶段维持 <code>ENABLE_AUTH=false</code> + <strong>严格内网隔离</strong>（DeepTutor/Qdrant 不可外达）；(b) 开启引擎鉴权，BFF 持服务令牌调用。建议先 (a)，多租户时切 (b)。</li>
+<li><strong>薄适配、不分叉</strong>：<code>agent_client</code> 保持薄封装，<strong>不 fork DeepTutor</strong>，让上游更新可平滑流入；用<strong>契约测试</strong>（对照 <code>/docs</code> 的 schema）守住边界。</li>
+<li><strong>降级语义重定义</strong>：现有"DeepTutor 不可用→DeepSeek 直调"在新模型下应明确为：流式中断/超时→提示重试或转快速模式，而非伪造一个简化解（避免给出未经校验的数学结论）。</li>
+</ol>
+</div>
+
+<h2>五、白标策略下的边界（哪些自建是正当的）</h2>
+<table>
+<tr><th>留在 MathVerse（BFF/业务）</th><th>交给 DeepTutor（AI 引擎）</th></tr>
+<tr><td>微信 OAuth 登录、微信支付、订阅/配额、发票合规<br>内容合规（敏感词、ICP 备案口径）<br>中国市场产品 UX、裂变/打卡/海报<br>业务分析与付费漏斗、估分/学习计划（业务口径）</td><td>深度解题、拍照解题、出题、判分<br>讲解/学习内容（Book Engine）、动画/可视化<br>RAG 知识库与检索、深度研究<br>对话记忆与个性化上下文、学伴 Agent</td></tr>
+</table>
+<p class="lead">原则：<strong>中国渠道与变现 + 合规留自建；数学智能与内容生产全部下沉引擎。</strong>这样既享受开源引擎的迭代红利，又守住自己不可复制的"错题/进度/渠道"数据飞轮。</p>
+
+<h2>六、修订的能力映射（替换产品设计 §5.1）</h2>
+<table>
+<tr><th>DeepTutor 真实能力</th><th>🔍 解题</th><th>📚 学习</th><th>👤 我的</th><th>接入方式</th></tr>
+<tr><td>unified_ws（solve 模式）</td><td>核心</td><td>例题</td><td>—</td><td>WebSocket 流式中继</td></tr>
+<tr><td>vision_solver</td><td>核心（拍照）</td><td>—</td><td>—</td><td>REST/上传 + 流式</td></tr>
+<tr><td>question + quiz_judge</td><td>举一反三</td><td>核心（练习+判分）</td><td>错因入库</td><td>REST 出题 + WS 判分</td></tr>
+<tr><td>book（Book Engine）</td><td>—</td><td>核心（交互微课）</td><td>—</td><td>REST 生成 + 渲染</td></tr>
+<tr><td>knowledge（KB）</td><td>检索增强</td><td>核心（教材/真题）</td><td>—</td><td>REST 索引/检索</td></tr>
+<tr><td>research</td><td>难点溯源</td><td>专题深挖</td><td>—</td><td>WS 流式</td></tr>
+<tr><td>memory（L1/L2/L3）</td><td>个性化</td><td>个性化</td><td>画像</td><td>REST 读写上下文</td></tr>
+<tr><td>tutorbot</td><td>—</td><td>学伴陪练</td><td>复习推送</td><td>Bot 实例 + 微信服务号</td></tr>
+<tr><td>dashboard（引擎内）</td><td>—</td><td>—</td><td>参考</td><td>不直用，业务看板自建</td></tr>
+</table>
+
+<h2>七、分阶段落地建议</h2>
+<table>
+<tr><th>阶段</th><th>动作</th><th>判定标准</th></tr>
+<tr><td><span class="tag t-fix">P0 契约验证</span></td><td>起一个 DeepTutor 实例，读 <code>/docs</code>，对 solve/question/vision/quiz_judge 写<strong>契约测试</strong>；据此重写 <code>agent_client</code> 的路径与交互模型</td><td>真实端点联通；契约测试绿；现有 mock 改为贴合真实 schema</td></tr>
+<tr><td><span class="tag t-build">P1 流式解题</span></td><td>打通 <code>unified_ws</code> → MathVerse <code>/ws</code> → 小程序的过程事件流</td><td>解题页能看到"分析/求解/校验"过程，无 90s 超时</td></tr>
+<tr><td><span class="tag t-reuse">P2 拍照解题</span></td><td>用 <code>vision_solver</code> 替换自建 OCR 计划</td><td>拍照→解题闭环；移除 MathPix 依赖项</td></tr>
+<tr><td><span class="tag t-reuse">P3 练习判分</span></td><td>用 <code>quiz_judge</code> 替换 <code>/exercise/grade</code> 的 DeepSeek 裸调</td><td>判分接回 <code>record_attempt</code>，掌握度更新不变</td></tr>
+<tr><td><span class="tag t-wrap">P4 学习体验</span></td><td>knowledge KB 承载课程/真题；book 生成交互微课</td><td>"学习"入口从文本+视频升级为可交互单元</td></tr>
+<tr><td><span class="tag t-wrap">P5 个性化与学伴</span></td><td>引入 memory 上下文；tutorbot + 微信服务号推送</td><td>讲解/解题带历史上下文；复习提醒可达</td></tr>
+</table>
+
+<h2>八、风险</h2>
+<ul>
+<li><strong>上游 API 演进</strong>：DeepTutor 活跃迭代，端点可能变。对策：版本锁定 + 契约测试 + 薄适配，不分叉。</li>
+<li><strong>鉴权与暴露面</strong>：引擎端点默认需鉴权而 docker 关了它——务必确保 DeepTutor/Qdrant <strong>仅内网可达</strong>，否则等于开放无鉴权 AI 算力。</li>
+<li><strong>流式与成本</strong>：research/visualize/animator 昂贵且耗时；freemium 经济模型需把这些划入付费档，并对 WS 会话设时长/并发上限。</li>
+<li><strong>数学正确性</strong>：复用引擎的 verification 链优于自建简化解；降级路径不应输出未校验结论。</li>
+<li><strong>字段级未知</strong>：本方案核实到路由与交互模型层；上线前需对照运行实例 <code>/docs</code> 落实每个端点的请求/响应 schema。</li>
+</ul>
+
+<div class="card" style="margin-top:26px">
+<b>一句话结论</b><br>
+MathVerse 的<strong>产品定位与业务分层是对的</strong>，但<strong>对引擎能力的假设是错的</strong>：既把引擎已有的（拍照解题、判分、出题、知识库、记忆、Book、学伴）重复自建，又用错了集成契约（路径/流式/鉴权三重错配）。系统性优化的主线是——<strong>把数学智能与内容生产彻底下沉到 DeepTutor 的真实接口（/api/v1 + unified_ws），MathVerse 专注微信渠道、变现与合规这层不可替代的业务壁垒。</strong>第一步且唯一阻塞项：<span class="bad">P0 契约验证</span>。
+</div>
+
+<h2 id="appendix">附录：核实到的真实端点契约（读自 router 源码）</h2>
+<p class="lead">以下路径与消息信封读自 <code>deeptutor/api/main.py</code> 与各 router 源码（<code>gh</code> 核实）。<strong>关键事实：几乎全部为 WebSocket 流式</strong>，httpx 同步 POST 模型从根上不适用。</p>
+<table>
+<tr><th>MathVerse 需求</th><th>真实端点</th><th>协议 / 发送内容</th></tr>
+<tr><td>深度解题（文字）</td><td><code>WS /api/v1/chat</code></td><td>发 <code>{session_id, message, mode:"solve"}</code>，流式回复；会话不存在则自动建</td></tr>
+<tr><td>对话 / 讲解</td><td><code>WS /api/v1/chat</code></td><td>同上，<code>mode</code> 切换（chat/solve/quiz/research/visualize）</td></tr>
+<tr><td>拍照解题</td><td><code>WS /api/v1/vision/solve</code></td><td>需鉴权；发 <code>{question, image_base64 | image_url, session_id}</code>，流式回 <code>{event, data}</code></td></tr>
+<tr><td>图像→几何分析</td><td><code>POST /api/v1/vision/analyze</code></td><td>REST，返回 GeoGebra 命令 / bbox（几何作图用）</td></tr>
+<tr><td>出题</td><td><code>WS /api/v1/question/generate</code></td><td>WS 流式</td></tr>
+<tr><td>举一反三（仿题）</td><td><code>WS /api/v1/question/mimic</code></td><td>WS 流式 —— 引擎自带"仿题"，直接替代自建 similar</td></tr>
+<tr><td>练习判分</td><td><code>WS /api/v1/quiz-judge</code></td><td>发 <code>{question, question_type, correct_answer, user_answer, 图片可选}</code>，<strong>支持图片作答</strong></td></tr>
+<tr><td>订阅 / 断线重连</td><td><code>WS /api/v1/ws</code>（unified）</td><td><code>{type:"subscribe_turn", turn_id, after_seq}</code> / <code>subscribe_session</code> / <code>ping</code> —— 订阅既有 turn 的事件流，适合多端同步与重连</td></tr>
+<tr><td>会话管理</td><td><code>GET /api/v1/chat/sessions[/{id}]</code> · <code>DELETE</code></td><td>REST 取数</td></tr>
+<tr><td>知识库 / 看板 / 记忆 / Book</td><td><code>/api/v1/{knowledge,dashboard,memory,book,notebook}</code></td><td>REST + 部分流式</td></tr>
+</table>
+
+<h3>AgentClient v2 改写蓝本</h3>
+<div class="card">
+<ul>
+<li><strong>从 httpx-POST 客户端改为 WS 中继</strong>：BFF 与 DeepTutor 维持 WebSocket（<code>/api/v1/chat</code>、<code>/vision/solve</code>、<code>/question/*</code>、<code>/quiz-judge</code>），把引擎事件流翻译成小程序自有 <code>/ws</code> 的精简事件（nginx 已留 <code>/ws</code> + 86400s 读超时）。</li>
+<li><strong>解题</strong>：连 <code>/api/v1/chat</code> 发 <code>{message, mode:"solve", session_id}</code>；逐片转发"分析/求解/校验"事件；结束后落库归档（沿用现有 <code>QuestionArchive</code> / <code>record_attempt</code>）。</li>
+<li><strong>拍照</strong>：连 <code>/vision/solve</code> 发 <code>image_base64</code>。删除 MathPix 自建计划。</li>
+<li><strong>判分</strong>：连 <code>/quiz-judge</code>，移除上一轮自建的 <code>/exercise/grade</code> DeepSeek 裸调（判分结果仍接回 <code>record_attempt</code> 驱动掌握度）。</li>
+<li><strong>仿题</strong>：<code>/question/mimic</code> 取代自建 similar 端点。</li>
+<li><strong>会话</strong>：用引擎 <code>session_id</code> 贯穿一次解题/学习会话，落实产品设计"会话即记录"。</li>
+<li><strong>鉴权</strong>：现阶段 <code>ENABLE_AUTH=false</code> + 内网隔离；上多租户时为 WS 握手注入服务令牌（<code>ws_require_auth</code>）。</li>
+</ul>
+</div>
+
+<p class="lead" style="margin-top:24px">本方案覆盖范围为"设计本身"；落地编码属后续工作。相关旧文档应据此更新：技术设计 §2.3 AgentClient、§4 集成协议；产品设计 §5.1 能力映射、§5.3 新增 AI 能力（OCR 改为复用 <code>vision_solver</code>、similar 改用 <code>question/mimic</code>、判分改用 <code>quiz-judge</code>）。</p>
+
+</div>
+</body>
+</html>
