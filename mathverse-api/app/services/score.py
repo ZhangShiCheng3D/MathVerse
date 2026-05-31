@@ -23,6 +23,10 @@ def estimate_score(
     if not kp_list:
         return {"estimated_score": 0, "pass_probability": 0, "weak_areas": []}
 
+    # Coarse Monte Carlo proxy: each question draws a random knowledge point and
+    # scores full marks with probability = its mastery. Solve questions can also
+    # earn ~40% partial credit when the full-mark roll misses. This is an
+    # aggregate estimate, not a per-question-type mapping.
     scores = []
     for _ in range(num_simulations):
         total = 0.0

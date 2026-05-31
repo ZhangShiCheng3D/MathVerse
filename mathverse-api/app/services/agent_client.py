@@ -1,10 +1,13 @@
 """HTTP client for DeepTutor backend, with timeout, retry, and circuit breaker."""
 import asyncio
+import logging
 import time
 import os
 from dataclasses import dataclass
 import httpx
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -121,6 +124,7 @@ class AgentClient:
             with open(template_full_path, encoding="utf-8") as f:
                 template = f.read()
         else:
+            logger.warning("Prompt template missing: %s — sending empty system prompt", template_full_path)
             template = ""
 
         data = await self._post("/api/chat", {
