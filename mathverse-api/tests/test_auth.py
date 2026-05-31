@@ -42,3 +42,30 @@ def test_refresh_with_wrong_token_type():
     # Decode should work (same secret)
     payload = decode_token(refresh)
     assert payload["type"] == "refresh"
+
+
+def test_refresh_endpoint_accepts_body(client):
+    """Regression: refresh must read the token from the JSON body, not a query param."""
+    from app.middleware.auth_middleware import create_refresh_token
+    refresh = create_refresh_token("u123")
+    resp = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+
+
+def test_refresh_endpoint_rejects_access_token(client):
+    token = create_access_token("u123")
+    resp = client.post("/api/auth/refresh", json={"refresh_token": token})
+    assert resp.status_code == 401
+
+
+def test_oauth_state_roundtrip():
+    from app.routes.auth import _create_oauth_state, _verify_oauth_state
+    _verify_oauth_state(_create_oauth_state())  # stateless verify, no raise
+
+
+def test_oauth_state_rejects_garbage():
+    from fastapi import HTTPException
+    from app.routes.auth import _verify_oauth_state
+    with pytest.raises(HTTPException):
+        _verify_oauth_state("not-a-real-token")
