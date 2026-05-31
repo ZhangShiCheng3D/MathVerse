@@ -21,7 +21,7 @@ interface UserStore {
   switchStage: (stage: string) => void;
 }
 
-export const useUserStore = create<UserStore>((set, get) => ({
+export const useUserStore = create<UserStore>((set) => ({
   user: null,
   isLogin: false,
   isLoading: true,

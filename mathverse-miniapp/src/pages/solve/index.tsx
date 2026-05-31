@@ -7,7 +7,7 @@ export default function SolvePage() {
   const {
     question, setQuestion, isSolving, result,
     expandedLayer, expandLayer, askWhy,
-    whyExplanation, isWhyLoading, solve, reset,
+    whyExplanation, solve, reset,
   } = useSolveStore();
   const user = useUserStore((s) => s.user);
   const [error, setError] = useState('');
