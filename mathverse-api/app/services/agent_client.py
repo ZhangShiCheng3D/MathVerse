@@ -1,11 +1,18 @@
-"""HTTP client for DeepTutor backend, with timeout, retry, and circuit breaker."""
+"""Client for the DeepTutor backend.
+
+Heavy solve/chat calls go over DeepTutor's real WebSocket API (see deeptutor_ws);
+the circuit breaker wraps those. Legacy REST helpers (_post) remain only for the
+not-yet-migrated quiz/lecture paths — see the TODO on those methods.
+"""
 import asyncio
 import logging
 import time
 import os
 from dataclasses import dataclass
 import httpx
+import websockets
 from app.config import settings
+from app.services import deeptutor_ws
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,20 @@ class AgentClient:
         self.base_url = base_url or settings.deeptutor_url
         self.circuit = CircuitBreaker()
 
+    async def _guarded(self, awaitable):
+        """Run a DeepTutor call under the circuit breaker, mapping failures to 503."""
+        if not self.circuit.can_try():
+            awaitable.close()
+            raise AgentUnavailableError("DeepTutor circuit breaker open")
+        try:
+            result = await awaitable
+            self.circuit.record_success()
+            return result
+        except (deeptutor_ws.WSStreamError, OSError, asyncio.TimeoutError,
+                websockets.WebSocketException) as e:
+            self.circuit.record_failure()
+            raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
+
     async def _post(self, path: str, json: dict, timeout: float = 60.0) -> dict:
         if not self.circuit.can_try():
             raise AgentUnavailableError("DeepTutor circuit breaker open")
@@ -83,38 +104,32 @@ class AgentClient:
         raise AgentUnavailableError("DeepTutor max retries exceeded")
 
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
-        """Call DeepTutor Deep Solve (6-Agent pipeline)."""
-        data = await self._post("/api/agent/deep-solve", {
-            "question": question,
-            "mode": "solve",
-            "context": {
-                "stage": stage,
-                "knowledge_point_id": kp_id,
-                "style": "socratic",
-                "language": "zh-CN",
-            },
-            "options": {
-                "max_steps": 15,
-                "enable_web_search": False,
-            },
-        }, timeout=90.0)
+        """Deep solve via DeepTutor chat WS (solve mode).
+
+        The chat stream returns prose, so steps/knowledge_points are not populated here;
+        structured three-layer output is a follow-up (prompt the engine for JSON).
+        """
+        message = f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤：\n{question}"
+        data = await self._guarded(deeptutor_ws.chat(message, mode="solve", timeout=90.0))
         return SolveResult(
-            status=data.get("status", "unknown"),
-            answer=data.get("answer", ""),
-            steps=data.get("steps", []),
-            knowledge_points=data.get("knowledge_points", []),
-            related_topics=data.get("related_topics", []),
-            common_mistakes=data.get("common_mistakes", []),
-            tokens_used=data.get("tokens_used", 0),
+            status="success",
+            answer=data["answer"],
+            steps=[],
+            knowledge_points=[],
+            related_topics=[],
+            common_mistakes=[],
+            tokens_used=0,
         )
 
     async def quick_solve(self, question: str, stage: str) -> str:
-        """Quick solve without full 6-Agent pipeline."""
-        data = await self._post("/api/chat", {
-            "message": f"请解答以下数学题，给出答案和简要步骤：\n{question}",
-            "context": {"stage": stage},
-        }, timeout=30.0)
-        return data.get("response", "")
+        """Quick answer via DeepTutor chat WS (chat mode)."""
+        message = f"请简要解答这道数学题（学段：{stage}），给出答案和要点：\n{question}"
+        data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
+        return data["answer"]
+
+    # TODO(integration): chat_with_template / generate_quiz still target legacy REST paths.
+    # Migrate to DeepTutor WS — lecture via chat WS (mode=chat), quiz via /api/v1/question/generate.
+    # Pending confirmation of the question/* event schema; see design optimization doc.
 
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
         """Call Chat endpoint with a custom prompt template."""
