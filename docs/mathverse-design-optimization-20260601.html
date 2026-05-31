@@ -166,7 +166,7 @@ MathVerse 的<strong>产品定位与业务分层是对的</strong>，但<strong>
 <tr><td>图像→几何分析</td><td><code>POST /api/v1/vision/analyze</code></td><td>REST，返回 GeoGebra 命令 / bbox（几何作图用）</td></tr>
 <tr><td>出题</td><td><code>WS /api/v1/question/generate</code></td><td>WS 流式</td></tr>
 <tr><td>举一反三（仿题）</td><td><code>WS /api/v1/question/mimic</code></td><td>WS 流式 —— 引擎自带"仿题"，直接替代自建 similar</td></tr>
-<tr><td>练习判分</td><td><code>WS /api/v1/quiz-judge</code></td><td>发 <code>{question, question_type, correct_answer, user_answer, 图片可选}</code>，<strong>支持图片作答</strong></td></tr>
+<tr><td>练习判分</td><td><code>WS /api/v1/question/judge</code></td><td>发 <code>{question, question_type, correct_answer, user_answer, user_answer_images?}</code>，<strong>支持图片作答</strong>；流回 <code>{type: started|text(content)|done|error}</code></td></tr>
 <tr><td>订阅 / 断线重连</td><td><code>WS /api/v1/ws</code>（unified）</td><td><code>{type:"subscribe_turn", turn_id, after_seq}</code> / <code>subscribe_session</code> / <code>ping</code> —— 订阅既有 turn 的事件流，适合多端同步与重连</td></tr>
 <tr><td>会话管理</td><td><code>GET /api/v1/chat/sessions[/{id}]</code> · <code>DELETE</code></td><td>REST 取数</td></tr>
 <tr><td>知识库 / 看板 / 记忆 / Book</td><td><code>/api/v1/{knowledge,dashboard,memory,book,notebook}</code></td><td>REST + 部分流式</td></tr>
@@ -183,6 +183,8 @@ MathVerse 的<strong>产品定位与业务分层是对的</strong>，但<strong>
 <li><strong>会话</strong>：用引擎 <code>session_id</code> 贯穿一次解题/学习会话，落实产品设计"会话即记录"。</li>
 <li><strong>鉴权</strong>：现阶段 <code>ENABLE_AUTH=false</code> + 内网隔离；上多租户时为 WS 握手注入服务令牌（<code>ws_require_auth</code>）。</li>
 </ul>
+<div style="margin-top:10px"><span class="tag t-build">新发现</span><strong>散文 vs 结构化</strong>：<code>chat</code> WS 流回的是<strong>散文答案</strong>（<code>stream</code>/<code>result</code> 文本），并非产品设计假设的结构化 <code>{steps[], knowledge_points[]}</code>。三层展示需<strong>提示引擎按 JSON 返回再解析</strong>（在 <code>message</code> 内约定 schema），或接受散文并前端排版。此项为采用 WS 后的必做决策。</div>
+<div style="margin-top:8px"><span class="tag t-reuse">已落地</span>本仓库已新增 <code>services/deeptutor_ws.py</code>（chat/vision/judge 三个已核实端点的 WS 客户端）+ <code>tests/test_deeptutor_ws.py</code>（用进程内真实 WS 服务器跑契约测试），并将 <code>agent_client.deep_solve/quick_solve</code> 切到 chat WS（散文答案，steps 暂空，circuit breaker 保留）。出题/讲解待 <code>question/*</code> 事件 schema 确认后迁移。</div>
 </div>
 
 <p class="lead" style="margin-top:24px">本方案覆盖范围为"设计本身"；落地编码属后续工作。相关旧文档应据此更新：技术设计 §2.3 AgentClient、§4 集成协议；产品设计 §5.1 能力映射、§5.3 新增 AI 能力（OCR 改为复用 <code>vision_solver</code>、similar 改用 <code>question/mimic</code>、判分改用 <code>quiz-judge</code>）。</p>
