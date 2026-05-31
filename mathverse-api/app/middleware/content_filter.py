@@ -1,15 +1,18 @@
-"""Content safety filter for user input and AI output."""
-import re
+"""Content safety filter for user input and AI output.
 
-SENSITIVE_PATTERNS = [
-    re.compile(r"敏感词示例1"),
-    re.compile(r"敏感词示例2"),
-]
+The word list is operational, not hard-coded — set SENSITIVE_WORDS (comma-separated)
+per deployment. Empty list means nothing is filtered.
+"""
+from app.config import settings
+
+
+def _words() -> list[str]:
+    return [w.strip() for w in settings.sensitive_words.split(",") if w.strip()]
 
 
 def filter_text(text: str) -> tuple[bool, str]:
-    """Check text against sensitive patterns. Returns (is_safe, filtered_text)."""
-    for pattern in SENSITIVE_PATTERNS:
-        if pattern.search(text):
+    """Check text against the configured word list. Returns (is_safe, filtered_text)."""
+    for word in _words():
+        if word in text:
             return False, "[内容已过滤]"
     return True, text
