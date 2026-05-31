@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Integer, Boolean, Float, DateTime, Text, UniqueConstraint, Index
+from sqlalchemy import Column, String, Integer, Boolean, Float, DateTime, Date, Text, UniqueConstraint, Index
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -78,7 +78,7 @@ class StudyPlan(Base):
     __table_args__ = (UniqueConstraint("user_id", "plan_date"),)
     id = Column(String, primary_key=True, default=_new_id)
     user_id = Column(String, nullable=False)
-    plan_date = Column(DateTime, nullable=False)
+    plan_date = Column(Date, nullable=False)
     tasks = Column(Text, nullable=False)
     generated_at = Column(DateTime, default=_now)
 
