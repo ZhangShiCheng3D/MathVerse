@@ -114,6 +114,7 @@ MathVerse API 管理所有业务逻辑（用户、错题、进度、付费），
 | `/api/learn/lecture` | POST | AI 生成知识点讲课内容 |
 | `/api/learn/examples/:kpId` | GET | 获取知识点的经典例题 |
 | `/api/learn/exercise/generate` | POST | AI 生成配套练习 |
+| `/api/learn/exercise/grade` | POST | 提交作答，AI 判分并更新掌握度 |
 | `/api/learn/animation/:kpId` | GET | 获取数学动画（预渲染缓存/CDN URL） |
 
 **我的 `/api/me`**

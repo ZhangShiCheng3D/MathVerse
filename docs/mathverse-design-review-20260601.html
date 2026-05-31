@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数界 MathVerse — 系统设计审查与优化建议</title>
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--ink:#e6e8ee;--mut:#9aa0ad;--line:#2a2e3a;
+        --p0:#ff4d4f;--p1:#ff9f40;--p2:#ffd666;--p3:#4dabf7;--ok:#52c41a;--accent:#7c9cff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:48px 28px 96px}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:.5px}
+  .sub{color:var(--mut);margin:0 0 32px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:26px 0 8px}
+  code{background:#0a0c12;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font:13px/1.5 "SF Mono",Consolas,monospace;color:#c3cbe0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
+  .kpi b{display:block;font-size:26px}
+  .kpi span{color:var(--mut);font-size:12px}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;color:#0f1117;margin-right:6px;vertical-align:middle}
+  .t-p0{background:var(--p0)}.t-p1{background:var(--p1)}.t-p2{background:var(--p2)}.t-p3{background:var(--p3)}.t-ok{background:var(--ok)}
+  .issue{border-left:3px solid var(--line);padding:4px 0 4px 16px;margin:18px 0}
+  .issue.p0{border-color:var(--p0)}.issue.p1{border-color:var(--p1)}.issue.p2{border-color:var(--p2)}.issue.p3{border-color:var(--p3)}
+  .issue h4{margin:0 0 6px;font-size:15px}
+  .loc{color:var(--mut);font-size:12px}
+  .fix{color:#b7e1c4;font-size:14px;margin-top:6px}
+  .fix::before{content:"→ 建议  ";color:var(--ok);font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#0a0c12;color:var(--mut);font-weight:600}
+  ul{margin:6px 0 6px 0;padding-left:20px}li{margin:3px 0}
+  .lead{color:var(--mut);font-size:14px}
+  .road td:first-child{white-space:nowrap;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>数界 MathVerse · 系统设计审查</h1>
+<p class="sub">代码与设计文档一致性审查 + 全面优化建议 · 2026-06-01 · 基于 codegraph 索引（44 文件 / 329 节点）</p>
+
+<div class="grid">
+  <div class="kpi"><b style="color:var(--p0)">5</b><span>P0 致命（安全/资金）</span></div>
+  <div class="kpi"><b style="color:var(--p1)">6</b><span>P1 功能性 Bug</span></div>
+  <div class="kpi"><b style="color:var(--p2)">6</b><span>P2 架构债</span></div>
+  <div class="kpi"><b style="color:var(--p3)">5</b><span>P3 工程/运维</span></div>
+</div>
+
+<div class="card">
+<b>总体判断</b><br>
+架构方向是对的：MathVerse API 作为 BFF、DeepTutor 作为无状态 AI 引擎、HTTP 解耦 —— 这套划分清晰且利于演进，<code>agent_client.py</code> 的熔断+重试也是合格的工程实践。但<strong>当前实现停留在"happy path 能跑通"的 MVP 骨架</strong>：支付链路、鉴权边界、付费生命周期存在可被直接利用的漏洞；设计文档中承诺的多项能力（内容过滤、公式渲染、埋点、多学段、降级）是<strong>未接线的死代码或缺失件</strong>。下面按优先级给出可执行的修复项。
+</div>
+
+<div class="card" style="border-color:var(--ok)">
+<b><span class="tag t-ok">已修复</span>修复进度（2026-06-01）</b><br>
+<strong>P0（5/5）、P1（10/10 代码项）、P2（6/6）、P3（前端 env 化 + compose healthcheck）已实现并通过测试。</strong>
+测试从 19 增至 <strong>47 全绿</strong>（新增 28 条复现/回归/安全网用例：支付验签与幂等、配额与付费过期、refresh body、OAuth state、降级 fallback、裸端点鉴权、me/learn/questions/pay 路由）。
+<ul>
+<li>新增 <code>services/quota.py</code>（付费有效期 <code>is_paid</code>、配额、streak），并修掉过程中发现的<strong>配额时区错位 bug</strong>（本地 <code>date.today()</code> vs UTC 存储）。</li>
+<li>新增 <code>database.py::get_db</code> 依赖 + SQLite <strong>WAL/busy_timeout</strong>；6 个路由 + 鉴权统一改用共享会话，消除手写 <code>SessionLocal</code> 样板与 detached 对象。</li>
+<li><code>content_filter</code> 已接入解题入口；补齐 <code>prompts/lecture/*.txt</code> 五学段模板 + 缺失告警。</li>
+</ul>
+<strong>第二轮补全（学习闭环）：</strong>发现并修复两处主干"开环"——<code>LearningProgress</code>（掌握度）此前<strong>从未被写入</strong>，导致进度/雷达/计划/估分读的是恒为 0 的空表；<code>AnalyticsEvent</code> 埋点表同样无写入。
+<ul>
+<li>新增 <code>services/progress.py::record_attempt</code>（EWMA 掌握度），用<strong>已评分信号</strong>驱动：错题录入=做错、错题复习评分≥3=掌握恢复 → 掌握度真实变化，雷达/计划/估分随之有效。</li>
+<li>新增 <code>services/analytics.py::log_event</code>，接入 solve / login / 订阅开通 / 错题录入与复习，业务看板有了数据来源。</li>
+<li><code>content_filter</code> 词表改为 <code>SENSITIVE_WORDS</code> 环境变量配置（移除占位正则，不再臆造敏感词）。</li>
+</ul>
+<strong>第三轮（学习闭环收口）：</strong>新增 <code>POST /api/learn/exercise/grade</code> 答题判分端点——此前 <code>exercise/generate</code> 能出题却无处提交。判分走 DeepSeek（抽出共享 <code>services/deepseek.py</code>，solve 的追问/举一反三/降级同源复用），结果接回 <code>record_attempt</code>，<strong>练习也能驱动掌握度</strong>（不再只靠错题）。判分回复做了 JSON 容错解析 + 启发式兜底。测试增至 <strong>59 全绿</strong>。
+<br><br><strong>仍待办（需产品/运维决策或属内容/数据工作，未写投机代码）：</strong>多学段知识图谱 JSON（内容缺失，P1-11）、OCR/语音端点（功能未做，P3-19）、Alembic 迁移（<code>create_all</code> MVP 阶段属过早引入，切 PG 时再上，P3-21）、<code>latex_renderer</code> 服务端渲染（按 Phase 2 规划）。
+</div>
+
+<h2><span class="tag t-p0">P0</span>致命问题 — 涉及资金、未授权成本与身份伪造</h2>
+
+<div class="issue p0">
+<h4>1. 微信支付回调无签名验证 —— 任何人可免费开通会员</h4>
+<p class="loc"><code>app/routes/pay.py:94</code> <code>wechat_callback</code></p>
+回调直接信任请求体里的 <code>out_trade_no</code>，查到订单就把 <code>status=active</code>、<code>user.tier=plan</code>。没有验签、没有金额核对、没有幂等。外网任意 POST 即可白嫖会员。<code>prepay</code> 返回的 <code>paySign:"MOCK_SIGN"</code> 也说明支付从未真正接通。
+<div class="fix">接入微信支付 v3 平台证书验签（<code>Wechatpay-Signature</code> 头）+ 校验回调金额与本地订单一致 + 以 <code>order_id</code> 做幂等（已 active 直接返回 SUCCESS）。验签失败一律拒绝。</div>
+</div>
+
+<div class="issue p0">
+<h4>2. <code>step-explain</code> / <code>similar</code> 无鉴权、无配额、直连 DeepSeek</h4>
+<p class="loc"><code>app/routes/solve.py:98</code>、<code>:126</code></p>
+这两个端点没有任何 <code>Depends(get_*_user)</code>，未登录即可调用，且每次都直接花钱调 <code>api.deepseek.com</code>。等于把你的 API Key 暴露成一个公开的、无限量的免费 LLM 代理 —— 成本 DoS。此外无 <code>try/except</code>，DeepSeek 返回错误结构时 <code>data["choices"][0]</code> 直接 KeyError → 500。
+<div class="fix">加 <code>get_current_user</code> 依赖并纳入每日配额；包裹异常转 502/503；给 httpx 调用统一封装（见 P2-13，复用 agent_client 的降级思路）。</div>
+</div>
+
+<div class="issue p0">
+<h4>3. 付费到期永不降级 —— 会员永久有效</h4>
+<p class="loc"><code>app/routes/pay.py:112</code> 写入 <code>tier_expires_at</code>，全仓无任何读取/降级逻辑</p>
+配额判断只看 <code>user.tier == "free"</code>。一旦付费，<code>tier</code> 被设为 <code>monthly/quarterly/yearly</code> 后<strong>再也不会回到 free</strong>，<code>tier_expires_at</code> 形同虚设。
+<div class="fix">在鉴权依赖里集中判定有效期：<code>is_paid = tier!='free' and tier_expires_at &gt; now()</code>，过期即视为 free（或起一个定时任务/登录时惰性降级）。配额判断改用此函数，别再裸比字符串。</div>
+</div>
+
+<div class="issue p0">
+<h4>4. CORS 通配 + 携带凭证，配置自相矛盾</h4>
+<p class="loc"><code>app/main.py:15</code> <code>allow_origins=["*"]</code> 且 <code>allow_credentials=True</code></p>
+按 CORS 规范，<code>credentials=True</code> 时 <code>origin</code> 不能是 <code>*</code>，浏览器会拒绝该响应；同时生产环境全量放开来源也是风险。
+<div class="fix">用环境变量配置白名单 origin 列表（小程序后端其实不依赖 CORS，H5 上线时再精确配置）。开发与生产分离。</div>
+</div>
+
+<div class="issue p0">
+<h4>5. JWT 密钥默认值可预测且无启动校验</h4>
+<p class="loc"><code>app/config.py:6</code> <code>jwt_secret = "change-me-in-production"</code></p>
+若部署时漏配 <code>JWT_SECRET</code>，服务会用公开的默认串静默启动，任何人可据此签发任意 <code>user_id</code> 的 access token，越权登录任意账号。
+<div class="fix">启动时断言生产环境密钥非默认值（<code>lifespan</code> 内校验，缺失则 fail-fast）；密钥长度 ≥32 字节。</div>
+</div>
+
+<h2><span class="tag t-p1">P1</span>功能性 Bug — 主流程会失败或数据失真</h2>
+
+<div class="issue p1">
+<h4>6. <code>/api/auth/refresh</code> 参数形态与前端不匹配，刷新必失败</h4>
+<p class="loc">后端 <code>auth.py:115</code> <code>async def refresh_token(refresh_token: str)</code> ← 裸 str = <strong>query 参数</strong>；前端 <code>api.ts:31</code> 把它放在 <strong>POST body</strong></p>
+FastAPI 会把它当作必填 query 参数，前端发 JSON body → 422，access token 过期后无法续期，用户 15 分钟后被强制掉线。现有测试只验证了 token 解码，没真正打这个端点，所以漏过。
+<div class="fix">用 Pydantic 模型接收 body（<code>class RefreshReq(BaseModel): refresh_token: str</code>），并补一条真实调用该端点的测试。</div>
+</div>
+
+<div class="issue p1">
+<h4>7. OAuth state 存在进程内存字典 + 多 worker</h4>
+<p class="loc"><code>auth.py:21</code> <code>_state_store: dict</code>；compose/设计为 2 workers</p>
+<code>wechat_login</code> 在 worker A 写入 state，<code>wechat_callback</code> 可能落到 worker B，<code>_state_store.pop(state)</code> 取不到 → "Invalid state"。重启亦丢失。登录会概率性失败。
+<div class="fix">state 存 Redis（带 TTL），或先用单 worker 过渡。生产上 OAuth/支付/限流状态都不该放进程内存。</div>
+</div>
+
+<div class="issue p1">
+<h4>8. <code>quick_solve</code> 不计配额、不归档 —— 免费配额可绕过</h4>
+<p class="loc"><code>solve.py:88</code></p>
+配额逻辑只在 <code>deep_solve</code> 里，<code>quick</code> 既不查 quota 也不写 <code>QuestionArchive</code>。免费用户改打 quick 即无限解题；同时 quick 解的题不进存档/热力图。
+<div class="fix">把配额校验与归档抽成共用函数，deep/quick 都走（quick 可单独计数权重）。</div>
+</div>
+
+<div class="issue p1">
+<h4>9. <code>StudyPlan.plan_date</code> 用 DateTime 列存 date 对象</h4>
+<p class="loc"><code>models/all.py:81</code> 定义 <code>DateTime</code>；<code>me.py:238/255</code> 用 <code>date.today()</code> 查询和插入</p>
+SQLite 弱类型下今天碰巧能跑，但 <code>UNIQUE(user_id, plan_date)</code> 与 <code>==</code> 比较依赖字符串格式一致，跨时区/迁移 PG 后会出现"每次都新建当天计划"或唯一约束冲突。
+<div class="fix">列类型改 <code>Date</code>，统一用 <code>date</code> 进出。</div>
+</div>
+
+<div class="issue p1">
+<h4>10. <code>streak_days</code> / <code>last_active_at</code> 永远为 0</h4>
+<p class="loc">全仓无写入点（仅 model 定义与读取）</p>
+首页连续打卡、<code>/api/me/streak</code> 的 <code>streak_days</code> 恒为 0；热力图 count 来自 QuestionArchive 尚可，但"连续天数"是死值。
+<div class="fix">在解题/复习成功后更新 <code>last_active_at</code>，按"昨天是否活跃"递增/重置 <code>streak_days</code>。抽到一个 <code>touch_activity(user)</code> 工具。</div>
+</div>
+
+<div class="issue p1">
+<h4>11. 多学段知识图谱缺失，全部回退到考研图谱</h4>
+<p class="loc"><code>learn.py:21</code> 找不到 <code>{stage}.json</code> 即 fallback <code>kaoyan-college.json</code>；目录下确实只有这一个文件</p>
+设计承诺 primary/junior/senior/college 多套图谱，实际小学初中高中请求都返回考研内容；<code>radar</code> 与 <code>plan_generator</code> 也硬编码只认 <code>gs/xd/gl</code> 前缀（考研三科）。
+<div class="fix">短期：在文档与 UI 明确"当前仅大学/考研"；中期：补齐各学段 JSON，radar 分组改为读图谱里的 subject 而非前缀硬编码。</div>
+</div>
+
+<h2><span class="tag t-p2">P2</span>架构债 — 设计与实现脱节</h2>
+
+<div class="issue p2">
+<h4>12. 三处"设计中的能力"是死代码 / 从未接线</h4>
+<ul>
+<li><code>middleware/content_filter.py</code> —— <code>filter_text</code> 全仓无人调用，且 <code>SENSITIVE_PATTERNS</code> 是占位符（"敏感词示例1"）。设计宣称"双向敏感词过滤"。</li>
+<li><code>services/latex_renderer.py</code> —— 注释自承"Phase 2 实现"，<code>/api/render/latex</code> 端点不存在。</li>
+<li><code>AnalyticsEvent</code> 表 —— 无任何写入，"行为埋点/业务看板"无数据来源。</li>
+</ul>
+<div class="fix">二选一：要么接线（解题入口/AI 输出过敏感词、关键动作写埋点），要么从设计文档移除以免误导。建议至少把 content_filter 接到 solve 入口（合规红线）。</div>
+</div>
+
+<div class="issue p2">
+<h4>13. <code>prompts/</code> 目录缺失 —— 讲课/模板调用发空 system prompt</h4>
+<p class="loc"><code>agent_client.py:118</code> 读 <code>../../prompts</code>，不存在则 <code>template=""</code></p>
+<code>generate_lecture</code>、<code>chat_with_template</code> 当前等于"无系统提示词裸调 Chat"，讲课质量无法保证。CLAUDE.md 已记录此坑。
+<div class="fix">补建 <code>prompts/lecture/*.txt</code> 等模板；模板缺失时记 warning 日志而非静默空串。</div>
+</div>
+
+<div class="issue p2">
+<h4>14. DB 会话样板重复 + 鉴权多一次往返 + detached 对象</h4>
+<p class="loc">几乎每个路由手写 <code>db = SessionLocal(); try/finally db.close()</code>；<code>auth_middleware.get_current_user</code> 单独开 session 取完即关</p>
+<code>get_current_user</code> 返回的是会话已关闭的 detached <code>User</code>，路由里又各开一个 session —— 每请求至少 2 次连接获取，且若某天访问到惰性属性会 <code>DetachedInstanceError</code>。
+<div class="fix">引入 <code>get_db()</code> FastAPI 依赖（<code>yield</code> + finally），鉴权与路由共用同一 session；User 不脱管。可减约一半样板。</div>
+</div>
+
+<div class="issue p2">
+<h4>15. SQLite + 多 worker + 写并发 → database is locked</h4>
+SQLite 单写者，2 个 uvicorn worker 同时写（解题归档、错题、计划）会偶发锁库。MVP 可接受，但要有意识。
+<div class="fix">短期：开启 WAL（<code>PRAGMA journal_mode=WAL</code>）+ <code>busy_timeout</code>，或先单 worker；增长期按设计切 PostgreSQL（ORM 已就绪，主要补迁移）。</div>
+</div>
+
+<div class="issue p2">
+<h4>16. 降级策略未实现</h4>
+<p class="loc">设计 §2.3："DeepTutor 不可用→DeepSeek 直调降级"；实际 <code>solve.py:56</code> 直接抛 503</p>
+熔断打开后用户得到的是硬错误，而非设计承诺的降级解答。
+<div class="fix">在 <code>AgentUnavailableError</code> 捕获处 fallback 到 DeepSeek 直调（已有 key 与调用范式）；或明确把"降级"从设计中降级为 P3。</div>
+</div>
+
+<div class="issue p2">
+<h4>17. <code>score</code> / <code>plan_generator</code> 逻辑可简化且语义偏差</h4>
+<ul>
+<li><code>score.py:30-35</code> 每道题 <code>random.choice(kp_list)</code> 随机抽知识点，与"按知识点掌握度估分"的语义不符；<code>elif</code> 里二次 <code>random()</code> 的部分给分逻辑也偏经验值。</li>
+<li><code>plan_generator.py:36-40</code> 排序键 <code>-(diff if mastery&lt;0.3 else -diff)</code> 反直觉，难维护（Karpathy：能压成更直白的就重写）。</li>
+</ul>
+<div class="fix">估分按题型映射到对应知识点子集抽样；排序键拆成清晰的 <code>(mastery, -difficulty, freq_rank)</code> 元组并加注释。</div>
+</div>
+
+<h2><span class="tag t-p3">P3</span>工程 / 运维 / 测试</h2>
+
+<table>
+<tr><th>项</th><th>问题</th><th>建议</th></tr>
+<tr><td>前端 BASE_URL</td><td><code>api.ts:3</code> 硬编码 <code>https://api.shuxuejie.com</code>，本地无法切换</td><td>按 <code>process.env.TARO_APP_API</code> 注入，dev/prod 分离</td></tr>
+<tr><td>OCR / 语音</td><td>设计列了 <code>/solve/ocr</code>、<code>/voice</code>，后端未实现</td><td>明确标注 Phase 2，或先接第三方 OCR</td></tr>
+<tr><td>测试覆盖</td><td>pay / learn / me / questions 路由 0 测试；refresh 真实路径未测</td><td>补这四个路由的核心用例 + 支付幂等/越权用例</td></tr>
+<tr><td>DB 迁移</td><td>无 Alembic，改字段要重建表</td><td>切 PG 前引入 Alembic，避免数据丢失</td></tr>
+<tr><td>健康检查 / 运维</td><td>compose 未配 <code>healthcheck</code>；<code>/api/health</code> 未被探活；ENABLE_AUTH=false 的 DeepTutor 暴露在内网需确认不可外达</td><td>compose 加 healthcheck + depends_on condition；确认 DeepTutor/Qdrant 仅内网</td></tr>
+</table>
+
+<h2>优化路线（建议执行顺序）</h2>
+<table class="road">
+<tr><th>批次</th><th>内容</th><th>判定标准</th></tr>
+<tr><td>第 1 批 · 止血</td><td>P0 全部（支付验签+幂等、两个裸端点加鉴权配额、付费过期降级、CORS 白名单、JWT 启动校验）</td><td>新增越权/伪造回调测试全部拒绝；过期会员被判为 free</td></tr>
+<tr><td>第 2 批 · 修流程</td><td>P1：refresh body 化、OAuth state 外置、quick 计配额、plan_date 改 Date、streak 更新、学段图谱说明</td><td>登录→刷新→解题→打卡全链路 e2e 通过</td></tr>
+<tr><td>第 3 批 · 还债</td><td>P2：get_db 依赖重构、content_filter 接线、补 prompts、SQLite WAL、降级 fallback、score/plan 简化</td><td>样板减少；pytest 全绿；熔断时返回降级解</td></tr>
+<tr><td>第 4 批 · 工程化</td><td>P3：env 化 BASE_URL、补测试、Alembic、healthcheck</td><td>CI 覆盖四路由；可平滑迁 PG</td></tr>
+</table>
+
+<div class="card" style="margin-top:28px">
+<b>一句话结论</b><br class="lead">
+骨架与分层是健康的，<strong>但在对外上线前，P0 的支付与鉴权漏洞必须先堵</strong>（当前任何人可白嫖会员、可免费烧你的 LLM 额度、可伪造任意用户身份）。其次 P1 的 refresh/OAuth/配额三处会让真实用户主流程随机失败。设计文档与实现的"承诺差"（过滤/渲染/埋点/多学段/降级）应在文档里诚实标注阶段，避免后续误判已完成。
+</div>
+
+</div>
+</body>
+</html>
