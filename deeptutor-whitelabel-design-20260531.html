@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepTutor白标产品设计文档 v1.0</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --card2: #22252f; --border: #2a2d3a;
+    --text: #e1e4eb; --text2: #8b8fa6; --accent: #6366f1; --accent2: #818cf8;
+    --green: #22c55e; --yellow: #eab308; --red: #ef4444; --orange: #f97316;
+    --blue: #3b82f6; --pink: #ec4899;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.7;
+    padding: 20px; max-width: 1200px; margin: 0 auto;
+  }
+  .cover {
+    text-align: center; padding: 60px 20px 40px;
+    border-bottom: 3px solid var(--accent); margin-bottom: 40px;
+  }
+  .cover h1 { font-size: 2.2rem; font-weight: 800; margin-bottom: 8px; }
+  .cover .sub { color: var(--accent2); font-size: 1.1rem; margin-bottom: 4px; }
+  .cover .meta { color: var(--text2); font-size: 0.85rem; }
+  .cover .badge-row { display: flex; gap: 8px; justify-content: center; margin-top: 20px; flex-wrap: wrap; }
+  .badge {
+    padding: 5px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+  }
+  .badge.g { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge.b { background: rgba(59,130,246,0.15); color: var(--blue); }
+  .badge.p { background: rgba(236,72,153,0.15); color: var(--pink); }
+  .badge.y { background: rgba(234,179,8,0.15); color: var(--yellow); }
+
+  h2 {
+    font-size: 1.4rem; font-weight: 700; margin: 48px 0 16px;
+    padding-bottom: 8px; border-bottom: 2px solid var(--accent);
+    color: #fff;
+  }
+  h3 {
+    font-size: 1.1rem; font-weight: 600; margin: 28px 0 12px;
+    color: var(--accent2);
+  }
+  h4 { font-size: 0.95rem; font-weight: 600; margin: 16px 0 8px; color: #c7d2fe; }
+
+  p, ul, ol { margin: 10px 0; }
+  ul, ol { padding-left: 20px; }
+  li { margin: 4px 0; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px; margin: 20px 0;
+  }
+  .card.accent { border-color: var(--accent); }
+  .card.green { border-color: rgba(34,197,94,0.3); }
+  .card.red { border-color: rgba(239,68,68,0.3); }
+
+  table {
+    width: 100%; border-collapse: collapse; margin: 16px 0;
+    font-size: 0.85rem; background: var(--card); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  th {
+    background: rgba(99,102,241,0.12); color: var(--accent2);
+    padding: 10px 14px; text-align: left; font-size: 0.78rem; white-space: nowrap;
+  }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  .arch-diagram {
+    background: var(--card2); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin: 20px 0;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8rem; line-height: 1.8; white-space: pre; overflow-x: auto;
+  }
+
+  .phase-timeline {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0;
+  }
+  @media (max-width: 768px) { .phase-timeline { grid-template-columns: 1fr; } }
+  .phase {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; text-align: center;
+  }
+  .phase .num { font-size: 2rem; font-weight: 800; color: var(--accent2); }
+  .phase .title { font-weight: 600; margin: 4px 0; }
+  .phase .time { font-size: 0.78rem; color: var(--text2); }
+
+  .insight {
+    background: rgba(99,102,241,0.08); border-left: 3px solid var(--accent);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0;
+  }
+  .warning {
+    background: rgba(239,68,68,0.08); border-left: 3px solid var(--red);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0;
+  }
+  .success {
+    background: rgba(34,197,94,0.08); border-left: 3px solid var(--green);
+    padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0;
+  }
+
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin: 16px 0;
+  }
+  .kpi {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 16px; text-align: center;
+  }
+  .kpi .val { font-size: 1.4rem; font-weight: 800; color: var(--accent2); }
+  .kpi .lbl { font-size: 0.75rem; color: var(--text2); margin-top: 4px; }
+
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li { padding: 4px 0; }
+  .checklist li::before { content: "☐ "; color: var(--text2); }
+
+  code {
+    background: rgba(99,102,241,0.12); padding: 2px 6px;
+    border-radius: 4px; font-size: 0.85em;
+  }
+
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>DeepTutor 白标产品设计文档</h1>
+  <div class="sub">基于 HKUDS/DeepTutor (Apache 2.0) 的白标化快速开发方案</div>
+  <div class="meta">版本 v1.0 · 2026-05-31 · 目标上线周期：4周</div>
+  <div class="badge-row">
+    <span class="badge g">Apache 2.0 商业友好</span>
+    <span class="badge b">24K+ GitHub Stars</span>
+    <span class="badge p">6 Agent 多智能体架构</span>
+    <span class="badge y">30+ LLM Provider（含国内）</span>
+  </div>
+</div>
+
+<!-- ====== 1. DeepTutor深度解析 ====== -->
+<h2>一、DeepTutor 深度解析</h2>
+
+<h3>1.1 项目概览</h3>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="val">24,000+</div><div class="lbl">GitHub Stars</div></div>
+  <div class="kpi"><div class="val">1,400+</div><div class="lbl">Forks</div></div>
+  <div class="kpi"><div class="val">39天</div><div class="lbl">0→10K Stars</div></div>
+  <div class="kpi"><div class="val">~200K行</div><div class="lbl">代码规模</div></div>
+  <div class="kpi"><div class="val">v1.4.0</div><div class="lbl">最新版本(2026.5)</div></div>
+  <div class="kpi"><div class="val">Apache 2.0</div><div class="lbl">开源协议</div></div>
+</div>
+
+<table>
+  <tr><th style="width:140px">维度</th><th>详情</th></tr>
+  <tr><td>开发团队</td><td>香港大学数据智能实验室 (HKUDS, 导师: Chao Huang)</td></tr>
+  <tr><td>仓库地址</td><td><code>github.com/HKUDS/DeepTutor</code></td></tr>
+  <tr><td>首次发布</td><td>2025年12月29日（v0.1.0）</td></tr>
+  <tr><td>重大重构</td><td>2026年4月3日（v1.0.0 — Agent-Native 架构完整重写）</td></tr>
+  <tr><td>Docker 镜像</td><td><code>ghcr.io/hkuds/deeptutor:latest</code>（支持 linux/amd64 + arm64）</td></tr>
+  <tr><td>主语言</td><td>后端 Python 3.11+ / 前端 TypeScript (Next.js 16 + React 19)</td></tr>
+  <tr><td>安装方式</td><td>Docker Compose 一键部署 / pip install / 源码安装</td></tr>
+</table>
+
+<h3>1.2 核心架构 — 双循环多智能体系统</h3>
+
+<p>DeepTutor 的核心差异化和技术壁垒在于其 <strong>双循环多智能体架构</strong>，这也是白标产品最核心的价值承载层：</p>
+
+<div class="arch-diagram">
+┌─────────────────────────────────────────────────────────┐
+│                    用户输入 (Question)                    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│              📋 分析循环 (Analysis Loop)                  │
+│                                                         │
+│   InvestigateAgent          NoteAgent                    │
+│   ├─ RAG 混合检索           ├─ 结构化笔记                  │
+│   ├─ 实时网络搜索           ├─ 知识提炼                    │
+│   ├─ 学术论文库查询         └─ 多源信息融合                │
+│   └─ 知识图谱遍历                                        │
+└──────────────────────┬──────────────────────────────────┘
+                       │ 分析结果
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│              🔧 求解循环 (Solve Loop)                     │
+│                                                         │
+│   PlanAgent ──→ ManagerAgent ──→ SolveAgent ──→ CheckAgent │
+│   制定策略       协调执行         逐步求解        验证正确性  │
+└──────────────────────┬──────────────────────────────────┘
+                       │ 最终答案 + 引用 + 推理过程
+                       ▼
+┌─────────────────────────────────────────────────────────┐
+│                    格式化输出 (Formatted Output)           │
+│        Markdown + LaTeX + 代码高亮 + 引用标注              │
+└─────────────────────────────────────────────────────────┘
+</div>
+
+<h3>1.3 六大功能模式</h3>
+
+<table>
+  <tr><th>模式</th><th>功能</th><th>白标价值</th></tr>
+  <tr>
+    <td><strong>Chat</strong></td>
+    <td>自由对话，RAG增强。上传文档后基于文档内容问答</td>
+    <td>基础辅导场景，替代通用AI Chatbot</td>
+  </tr>
+  <tr>
+    <td><strong>Deep Solve</strong></td>
+    <td>多Agent协作逐步解题，含精确引用和推理链</td>
+    <td>数理化大题辅导，核心竞争力</td>
+  </tr>
+  <tr>
+    <td><strong>Quiz Generation</strong></td>
+    <td>从上传文档自动生成选择题/填空题/计算题/问答题</td>
+    <td>教师出题、学生自测，刚需功能</td>
+  </tr>
+  <tr>
+    <td><strong>Deep Research</strong></td>
+    <td>主题拆解→并行研究→结构化报告生成</td>
+    <td>论文辅助、深度专题学习</td>
+  </tr>
+  <tr>
+    <td><strong>Math Animator</strong></td>
+    <td>基于Manim生成数学概念动画（微积分/线性代数/几何）</td>
+    <td>高数/考研数学的视觉化学习</td>
+  </tr>
+  <tr>
+    <td><strong>Visualize</strong></td>
+    <td>交互式图表/知识图谱可视化 (Chart.js/SVG/HTML)</td>
+    <td>概念关系图、学习进度仪表盘</td>
+  </tr>
+</table>
+
+<h3>1.4 关键技术组件</h3>
+
+<div class="two-col">
+  <div class="card">
+    <h4>🧠 Agent 引擎 — nanobot</h4>
+    <p>HKUDS自研的轻量级Agent框架（同为Apache 2.0），特点：</p>
+    <ul>
+      <li>支持多Agent并行/串行编排</li>
+      <li>内置记忆管理（短期+长期）</li>
+      <li>Tool-use 标准化接口</li>
+      <li>支持12+消息平台部署（Discord/Telegram/微信/Slack...）</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>📚 RAG 引擎 — LlamaIndex</h4>
+    <p>负责文档解析、向量化、混合检索：</p>
+    <ul>
+      <li>支持 PDF/DOCX/XLSX/PPTX/Markdown</li>
+      <li>混合检索（向量+关键词）</li>
+      <li>Qdrant 向量数据库</li>
+      <li>30+ Embedding Provider</li>
+    </ul>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <h4>🤖 LLM 层</h4>
+    <ul>
+      <li>30+ Provider 支持</li>
+      <li>国内模型：<strong>通义千问/DeepSeek/智谱/月之暗面/文心/字节豆包</strong></li>
+      <li>本地模型：Ollama/vLLM/llama.cpp</li>
+      <li>统一接口，换模型只需改环境变量</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>🖥️ 前端层</h4>
+    <ul>
+      <li>Next.js 16 + React 19 + TypeScript</li>
+      <li>Tailwind CSS 样式系统</li>
+      <li>响应式设计（桌面+平板+手机）</li>
+      <li>暗色/亮色主题支持</li>
+    </ul>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <h4>🔐 多用户系统 (v1.3.8+)</h4>
+    <ul>
+      <li>bcrypt 密码哈希 + JWT Session</li>
+      <li>内置管理员面板</li>
+      <li>可选 PocketBase 侧载（支持OAuth）</li>
+      <li>用户隔离的知识库和记忆</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h4>📦 Knowledge Hub</h4>
+    <ul>
+      <li>文档上传→自动向量化→RAG就绪</li>
+      <li>彩色笔记本组织洞察</li>
+      <li>自定义 Skills 系统</li>
+      <li>题库回顾功能</li>
+    </ul>
+  </div>
+</div>
+
+<h3>1.5 Apache 2.0 协议意味着什么</h3>
+
+<div class="success">
+  <strong>你可以合法地：</strong>
+  <ul>
+    <li>✅ 商业使用 — 直接卖钱，无需付费给HKUDS</li>
+    <li>✅ 修改源码 — 改Logo、改UI、改功能、加模块</li>
+    <li>✅ 私有部署 — 不需要公开你的修改</li>
+    <li>✅ 重新分发 — 打包成你自己的产品</li>
+    <li>✅ 商标自由 — 用你自己的品牌名称</li>
+  </ul>
+  <strong>你只需要：</strong>
+  <ul>
+    <li>📋 保留原始LICENSE文件和版权声明（可以放在代码注释或关于页面）</li>
+    <li>📋 修改过的文件加个notice说明改了哪里</li>
+  </ul>
+  <p style="margin-top:8px; color: var(--text2);">这就是Apache 2.0被称为"商业最友好开源协议"的原因。</p>
+</div>
+
+<!-- ====== 2. 白标策略 ====== -->
+<h2>二、白标策略 — 五层定制模型</h2>
+
+<p>白标不是简单的"换个Logo"。DeepTutor的白标化需要在<strong>五个层级</strong>逐层定制，每一层的深度决定了产品的差异化程度：</p>
+
+<div class="card accent">
+  <h3 style="margin-top:0;">白标深度金字塔</h3>
+  <table>
+    <tr><th>层级</th><th>定制内容</th><th>工作量</th><th>差异化</th><th>用户感知</th></tr>
+    <tr>
+      <td><strong>L1 换皮</strong></td>
+      <td>Logo、配色、名称、favicon</td>
+      <td>0.5天</td>
+      <td>无</td>
+      <td>"换了个皮肤"</td>
+    </tr>
+    <tr>
+      <td><strong>L2 内容注入</strong></td>
+      <td>预置知识库（真题/教材）、中文LLM切换、提示词本地化</td>
+      <td>3-5天</td>
+      <td>低</td>
+      <td>"里面的内容跟考试有关"</td>
+    </tr>
+    <tr>
+      <td><strong>L3 体验改造</strong></td>
+      <td>中国考试专用UI、学习路径引导、估分系统、微信登录</td>
+      <td>1-2周</td>
+      <td>中</td>
+      <td>"这个App就是为我做的"</td>
+    </tr>
+    <tr>
+      <td><strong>L4 功能增强</strong></td>
+      <td>错题本、智能组卷、学习计划生成、督学提醒、多端同步</td>
+      <td>2-4周</td>
+      <td>高</td>
+      <td>"这功能别家没有"</td>
+    </tr>
+    <tr>
+      <td><strong>L5 生态闭环</strong></td>
+      <td>自研内容体系、教师端后台、B端学校管理面板、API对外开放</td>
+      <td>2-3月</td>
+      <td>极高</td>
+      <td>"整个教学都用这个了"</td>
+    </tr>
+  </table>
+</div>
+
+<div class="insight">
+  <strong>MVP策略建议：</strong>首发走 L1+L2+L3部分，4周内上线。L4功能按用户反馈迭代追加。L5是B端变现通道，验证C端PMF后再投入。
+</div>
+
+<!-- ====== 3. 产品定位 ====== -->
+<h2>三、产品定位</h2>
+
+<h3>3.1 首发目标考试</h3>
+
+<table>
+  <tr><th>考试</th><th>年考生数</th><th>客单价接受度</th><th>竞争强度</th><th>内容壁垒</th><th>推荐优先级</th></tr>
+  <tr>
+    <td><strong>考研数学</strong></td>
+    <td>~200万</td>
+    <td>¥199-499/年</td>
+    <td>中（张宇/汤家凤/李永乐等名师主导，无AI产品）</td>
+    <td>高（需要真题+解析）</td>
+    <td><span class="badge g">P0 首发</span></td>
+  </tr>
+  <tr>
+    <td><strong>考研英语</strong></td>
+    <td>~457万</td>
+    <td>¥99-299/年</td>
+    <td>高（扇贝/百词斩等成熟产品）</td>
+    <td>中（真题公开）</td>
+    <td><span class="badge b">P1 第二</span></td>
+  </tr>
+  <tr>
+    <td><strong>考公行测</strong></td>
+    <td>~300万</td>
+    <td>¥299-599/年</td>
+    <td>中（粉笔主导，无AI）</td>
+    <td>中（真题公开）</td>
+    <td><span class="badge b">P1 第二</span></td>
+  </tr>
+  <tr>
+    <td><strong>CET-4/6</strong></td>
+    <td>~2000万</td>
+    <td>¥49-149/年</td>
+    <td>极高（免费产品多）</td>
+    <td>低</td>
+    <td><span class="badge y">P2 扩展</span></td>
+  </tr>
+</table>
+
+<h3>3.2 为什么考研数学是首发最佳选择</h3>
+
+<div class="card green">
+  <ol>
+    <li><strong>DeepTutor的Math Animator是独特武器：</strong>没有一个中国考研产品提供数学概念动画。DeepTutor基于Manim的Math Animator可以把极限、导数、积分、线性变换变成30秒动画——这是张宇讲课的核心吸引力（"画画讲题"），现在AI能做。</li>
+    <li><strong>Deep Solve模式天然适合数学大题：</strong>考研数学的大题（证明题、计算题）需要多步推理，DeepTutor的PlanAgent→SolveAgent→CheckAgent双循环架构恰好解决"学生不会做、看答案也不懂步骤"的痛点。</li>
+    <li><strong>竞争真空：</strong>粉笔/中公有题库没AI推理，作业帮/小猿搜题面向K12不覆盖考研数学难度，ChatGPT/豆包能做但没有"不直接给答案"的教学设计。</li>
+    <li><strong>付费意愿强：</strong>考研学生是付费意愿最强的教育用户群，¥199-499/年的定价已被验证（张宇全程班¥1000+）。</li>
+    <li><strong>内容可获取：</strong>近10年考研数学真题公开，可批量导入DeepTutor Knowledge Hub做RAG底座。</li>
+  </ol>
+</div>
+
+<h3>3.3 产品名称建议</h3>
+
+<table>
+  <tr><th>候选名</th><th>定位</th><th>适用场景</th></tr>
+  <tr><td><strong>数研助手</strong></td><td>考研数学AI辅导</td><td>考研垂直（推荐首发用）</td></tr>
+  <tr><td><strong>题深</strong></td><td>深度解题AI</td><td>多考试扩展时可用</td></tr>
+  <tr><td><strong>解牛AI</strong></td><td>庖丁解牛式步骤拆解</td><td>品牌感强，适合独立产品</td></tr>
+  <tr><td><strong>StepSolve</strong></td><td>国际化备用名</td><td>出海时使用</td></tr>
+</table>
+
+<!-- ====== 4. 技术架构 ====== -->
+<h2>四、技术实施方案</h2>
+
+<h3>4.1 总体架构（白标修改点标注）</h3>
+
+<div class="arch-diagram">
+┌──────────────────────────────────────────────────────────────┐
+│                      用户访问层                               │
+│  Web App (your-domain.com)  │  微信小程序  │  移动端H5        │
+│  🔴 自定义域名 + SSL证书    │  🔴 新增     │  🔴 响应式适配     │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │   Nginx 反向代理     │  🔴 新增：路由+限流+静态资源缓存
+                    │   :443 → :3782(前端)  │
+                    │   /api → :8001(后端) │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                                 ▼
+┌─────────────────────────┐     ┌─────────────────────────┐
+│   前端 (Next.js :3782)   │     │   后端 (FastAPI :8001)    │
+│                         │     │                         │
+│ 🟢 DeepTutor 原版保留：  │     │ 🟢 DeepTutor 原版保留：   │
+│  • 6模式Chat UI         │     │  • 双循环Agent系统       │
+│  • Co-Writer 编辑器     │     │  • RAG (LlamaIndex)     │
+│  • Knowledge Hub UI     │     │  • nanobot Agent引擎    │
+│  • Book Engine 阅读器   │     │  • 30+ LLM Provider     │
+│                         │     │                         │
+│ 🔴 白标修改：           │     │ 🔴 白标修改：            │
+│  • 全局品牌替换(名/Logo) │     │  • 中文Prompt模板注入    │
+│  • 配色方案(主题)       │     │  • 考研领域知识库预置     │
+│  • 首页重构(考试导向)    │     │  • 估分引擎(新增API)     │
+│  • 学习路径引导UI       │     │  • 微信登录(OAuth)      │
+│  • 错题本模块(新增)     │     │  • 用户行为埋点          │
+│  • 微信支付集成         │     │  • 内容审核过滤          │
+└─────────────────────────┘     └──────────┬──────────────┘
+                                           │
+                              ┌────────────┼────────────┐
+                              ▼            ▼            ▼
+                         ┌────────┐ ┌──────────┐ ┌──────────┐
+                         │Qdrant  │ │ SQLite   │ │ Redis    │
+                         │向量DB  │ │ 用户/记忆 │ │ 会话缓存 │
+                         └────────┘ └──────────┘ └──────────┘
+</div>
+
+<h3>4.2 关键技术选型（中国化适配）</h3>
+
+<table>
+  <tr><th>组件</th><th>DeepTutor原版</th><th>白标版选型</th><th>原因</th></tr>
+  <tr>
+    <td>主LLM</td>
+    <td>OpenAI GPT-4o</td>
+    <td><strong>DeepSeek V3</strong></td>
+    <td>国产模型数学推理最强、成本低、DeepTutor已原生支持</td>
+  </tr>
+  <tr>
+    <td>备用LLM</td>
+    <td>Anthropic Claude</td>
+    <td><strong>通义千问 Qwen3-32B</strong></td>
+    <td>EduQwen在教育任务上超越GPT-4o，国内合规</td>
+  </tr>
+  <tr>
+    <td>Embedding</td>
+    <td>OpenAI text-embedding-3</td>
+    <td><strong>BGE-M3 (智源)</strong> 或 <strong>通义Embedding</strong></td>
+    <td>中文Embedding效果优于OpenAI，国内可用</td>
+  </tr>
+  <tr>
+    <td>网络搜索</td>
+    <td>Brave Search</td>
+    <td><strong>DuckDuckGo (免费)</strong> + <strong>Bing Search</strong></td>
+    <td>DeepTutor已支持DuckDuckGo免费方案</td>
+  </tr>
+  <tr>
+    <td>部署平台</td>
+    <td>Docker</td>
+    <td><strong>阿里云ECS + Docker</strong></td>
+    <td>国内用户低延迟，备案方便</td>
+  </tr>
+  <tr>
+    <td>对象存储</td>
+    <td>本地文件系统</td>
+    <td><strong>阿里云OSS</strong></td>
+    <td>上传的PDF/文档持久化存储</td>
+  </tr>
+</table>
+
+<h3>4.3 详细修改清单</h3>
+
+<div class="card">
+  <h4>🔴 前端修改项（Next.js 应用）</h4>
+  <table>
+    <tr><th>文件/目录</th><th>修改内容</th><th>工作量</th></tr>
+    <tr><td><code>web/public/</code></td><td>替换 favicon.ico、logo.svg、og-image.png</td><td>0.5h</td></tr>
+    <tr><td><code>web/src/app/layout.tsx</code></td><td>修改 metadata title/description 为品牌名</td><td>0.5h</td></tr>
+    <tr><td><code>tailwind.config.ts</code></td><td>替换品牌色（primary → 品牌主色，accent → 品牌辅色）</td><td>1h</td></tr>
+    <tr><td><code>web/src/components/</code></td><td>全局替换 DeepTutor 字样为品牌名（~15个文件）</td><td>2h</td></tr>
+    <tr><td><code>web/src/app/page.tsx</code></td><td>首页重构：从通用Chat→考试导向落地页</td><td>4h</td></tr>
+    <tr><td><code>web/src/components/Sidebar.tsx</code></td><td>导航重构：增加"我的考试""错题本""学习计划"入口</td><td>3h</td></tr>
+    <tr><td><code>web/src/app/auth/</code></td><td>增加微信OAuth登录（或手机验证码登录）</td><td>8h</td></tr>
+    <tr><td><code>web/src/components/chat/</code></td><td>Chat UI 增加"考试模式切换"（数学一/二/三）</td><td>3h</td></tr>
+    <tr><td><strong>新增</strong></td><td>错题本页面（/notebook）+ 收藏/标记功能</td><td>8h</td></tr>
+    <tr><td><strong>新增</strong></td><td>学习进度仪表盘（/dashboard）— 知识点掌握度雷达图</td><td>6h</td></tr>
+    <tr><td><strong>新增</strong></td><td>付费墙组件 + 微信支付集成</td><td>6h</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>🔴 后端修改项（Python/FastAPI 应用）</h4>
+  <table>
+    <tr><th>文件/目录</th><th>修改内容</th><th>工作量</th></tr>
+    <tr><td><code>.env</code></td><td>切换到 DeepSeek/通义千问；配置中文Embedding</td><td>0.5h</td></tr>
+    <tr><td><code>src/agents/prompts/</code></td><td>所有Agent的系统提示词翻译为中文 + 注入考研领域知识指令</td><td>4h</td></tr>
+    <tr><td><code>src/agents/solve/</code></td><td>修改输出格式为中文数学表达习惯（"解：""证：" 等）</td><td>2h</td></tr>
+    <tr><td><strong>新增API</strong></td><td><code>/api/score-estimate</code> — 蒙特卡洛模拟估分接口</td><td>6h</td></tr>
+    <tr><td><strong>新增API</strong></td><td><code>/api/study-plan</code> — 基于知识图谱的学习计划生成</td><td>4h</td></tr>
+    <tr><td><strong>新增API</strong></td><td><code>/api/mistakes</code> — 错题CRUD + 智能复习提醒</td><td>4h</td></tr>
+    <tr><td><strong>新增</strong></td><td>微信支付回调处理 webhook</td><td>4h</td></tr>
+    <tr><td><strong>新增</strong></td><td>内容审核中间件（敏感词过滤 + 防滥用）</td><td>3h</td></tr>
+    <tr><td><strong>新增</strong></td><td>用户行为埋点（注册/付费/活跃天数/题目提交次数）</td><td>3h</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>🔴 内容层修改项</h4>
+  <table>
+    <tr><th>项目</th><th>内容</th><th>工作量</th></tr>
+    <tr><td>考研数学知识图谱</td><td>高等数学+线性代数+概率论，三级分类（章→节→知识点），每个知识点标注考频和难度</td><td>2天</td></tr>
+    <tr><td>真题库导入</td><td>近10年（2017-2026）考研数学一/二/三真题 + 官方解析，PDF→Knowledge Hub</td><td>1天</td></tr>
+    <tr><td>中文Prompt模板</td><td>6个Agent的中文指令模板：苏格拉底引导风格、不直接给答案、步骤标注、难度自适应</td><td>2天</td></tr>
+    <tr><td>教材知识点映射</td><td>同济高数/浙大概率论/清华线代 → 考研大纲知识点 → DeepTutor Skills</td><td>1天</td></tr>
+  </table>
+</div>
+
+<h3>4.4 数据库设计（新增表）</h3>
+
+<div class="arch-diagram">
+-- 在DeepTutor原有SQLite基础上新增以下表
+
+-- 错题本
+CREATE TABLE mistake_notebook (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    question_text TEXT NOT NULL,       -- 原题内容
+    user_answer TEXT,                  -- 用户当时的答案
+    correct_answer TEXT,               -- 正确答案
+    solution_steps TEXT,               -- AI生成的解题步骤
+    knowledge_points TEXT,             -- 关联的知识点(JSON array)
+    subject TEXT,                      -- 高数/线代/概率论
+    difficulty INTEGER,                -- 1-5
+    created_at TIMESTAMP,
+    next_review_at TIMESTAMP,          -- FSRS下次复习时间
+    review_count INTEGER DEFAULT 0,    -- 复习次数
+    mastered BOOLEAN DEFAULT FALSE     -- 是否已掌握
+);
+
+-- 学习进度
+CREATE TABLE learning_progress (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    knowledge_point_id TEXT NOT NULL,  -- 对应知识图谱节点ID
+    mastery_level REAL DEFAULT 0,      -- 0.0-1.0 掌握度
+    questions_attempted INTEGER DEFAULT 0,
+    questions_correct INTEGER DEFAULT 0,
+    last_practiced_at TIMESTAMP,
+    estimated_readiness REAL           -- 蒙特卡洛估计的应试准备度
+);
+
+-- 付费记录
+CREATE TABLE subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    plan TEXT,                         -- monthly / yearly
+    amount INTEGER,                    -- 分
+    status TEXT,                       -- active / expired / cancelled
+    started_at TIMESTAMP,
+    expires_at TIMESTAMP,
+    wechat_order_id TEXT
+);
+</div>
+
+<!-- ====== 5. 开发计划 ====== -->
+<h2>五、四周开发计划</h2>
+
+<div class="phase-timeline">
+  <div class="phase">
+    <div class="num">W1</div>
+    <div class="title">基础搭建 + L1换皮</div>
+    <div class="time">Day 1-7</div>
+    <div style="text-align:left; font-size:0.82rem; margin-top:8px;">
+      • Fork DeepTutor<br>
+      • Docker部署验证<br>
+      • 品牌替换(名/Logo/色)<br>
+      • DeepSeek API接入<br>
+      • 中文Prompt模板<br>
+      • 考研知识图谱搭建<br>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="num">W2</div>
+    <div class="title">L2内容注入 + L3体验</div>
+    <div class="time">Day 8-14</div>
+    <div style="text-align:left; font-size:0.82rem; margin-top:8px;">
+      • 真题库导入<br>
+      • 首页重构(考试导向)<br>
+      • 考试模式切换UI<br>
+      • Chat UI 中文适配<br>
+      • 微信登录集成<br>
+      • 估分API开发<br>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="num">W3</div>
+    <div class="title">L4差异化功能</div>
+    <div class="time">Day 15-21</div>
+    <div style="text-align:left; font-size:0.82rem; margin-top:8px;">
+      • 错题本模块<br>
+      • 学习进度仪表盘<br>
+      • 智能学习计划<br>
+      • 付费墙+微信支付<br>
+      • 用户行为埋点<br>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="num">W4</div>
+    <div class="title">测试 + 上线</div>
+    <div class="time">Day 22-28</div>
+    <div style="text-align:left; font-size:0.82rem; margin-top:8px;">
+      • 内测（50人考研群）<br>
+      • Bug修复+反馈迭代<br>
+      • 阿里云部署<br>
+      • 域名+备案<br>
+      • ICP备案提交<br>
+      • 正式上线发布<br>
+    </div>
+  </div>
+</div>
+
+<h3>5.1 详细Day-by-Day</h3>
+
+<div class="card">
+  <h4>Week 1: 基础搭建（目标：可运行的品牌化版本）</h4>
+  <table>
+    <tr><th>Day</th><th>任务</th><th>产出</th></tr>
+    <tr><td>D1</td><td>Fork DeepTutor到私有仓库；Docker Compose本地部署；验证所有6个模式正常运行</td><td>本地运行版本</td></tr>
+    <tr><td>D2</td><td>切换LLM到DeepSeek V3；修改.env配置；测试Deep Solve/Quiz在中文场景的表现</td><td>DeepSeek驱动版本</td></tr>
+    <tr><td>D3</td><td>品牌替换：修改前端metadata/logo/favicon/配色；全文搜索替换DeepTutor→品牌名</td><td>品牌化前端</td></tr>
+    <tr><td>D4</td><td>中文Prompt模板：翻译6个Agent的System Prompt为中文；注入考研数学领域指令（苏格拉底风格、步骤标注、不直接给答案）</td><td>中文Agent系统</td></tr>
+    <tr><td>D5</td><td>考研知识图谱搭建：高等数学+线性代数+概率论，三级分类，标注考频和难度</td><td>知识图谱JSON</td></tr>
+    <tr><td>D6</td><td>真题收集：下载近10年考研数一/二/三真题PDF，批量导入Knowledge Hub，验证RAG检索质量</td><td>RAG知识库就绪</td></tr>
+    <tr><td>D7</td><td>缓冲日 + Week1集成测试：用20道真题测试Chat、Deep Solve、Quiz Generation三个核心模式</td><td>Week1可演示版本</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>Week 2: 体验层（目标：看起来像一个独立产品）</h4>
+  <table>
+    <tr><th>Day</th><th>任务</th><th>产出</th></tr>
+    <tr><td>D8</td><td>首页重构：从通用Chat界面→考研数学落地页（"你的AI考研数学老师"），突出Deep Solve和Math Animator</td><td>新首页</td></tr>
+    <tr><td>D9</td><td>考试模式切换：数一/数二/数三切换器，切换时切换知识图谱范围+题目难度+真题范围</td><td>考试模式选择</td></tr>
+    <tr><td>D10</td><td>Chat UI中文适配：输入框placeholder中文提示、快捷操作按钮（"出5道题""总结这个知识点""生成动画"）、Markdown数学公式渲染优化</td><td>优化Chat体验</td></tr>
+    <tr><td>D11</td><td>微信登录：接入微信开放平台OAuth；用户数据隔离（自己的知识库+记忆+错题本）</td><td>微信登录可用</td></tr>
+    <tr><td>D12</td><td>估分API开发：蒙特卡洛估分算法（随机抽题→模拟→统计→映射到通过概率），输出"当前估分：XX分（预测通过率：XX%）"</td><td>估分API</td></tr>
+    <tr><td>D13</td><td>Math Animator中文适配：确保Manim生成的动画中的数学符号和注释显示中文</td><td>中文数学动画</td></tr>
+    <tr><td>D14</td><td>缓冲日 + Week2集成测试：完整用户流程测试（注册→选考试→上传文档→Deep Solve→Quiz→查看估分）</td><td>Week2可演示版本</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>Week 3: 差异化功能（目标：有独特卖点）</h4>
+  <table>
+    <tr><th>Day</th><th>任务</th><th>产出</th></tr>
+    <tr><td>D15</td><td>错题本：前端页面（错题列表+筛选+展开看解析）+ 后端CRUD API + FSRS间隔复习调度</td><td>错题本模块</td></tr>
+    <tr><td>D16</td><td>学习进度仪表盘：知识点掌握度雷达图（Chart.js）、学习时长统计、本周正确率趋势</td><td>进度仪表盘</td></tr>
+    <tr><td>D17</td><td>智能学习计划：根据估分结果+知识图谱掌握度，自动生成"今天应该学什么"的3-5项任务列表</td><td>学习计划生成器</td></tr>
+    <tr><td>D18</td><td>付费墙：定价页面（¥29/月、¥199/年）+ 功能限制（免费版：10题/天，付费版：无限）</td><td>付费体系</td></tr>
+    <tr><td>D19</td><td>微信支付集成：JSAPI支付 + 支付回调 + 自动开通会员</td><td>支付闭环</td></tr>
+    <tr><td>D20</td><td>用户行为埋点：注册、付费、每日活跃、题目提交次数、错题数量——Grafana或简版后台查看</td><td>数据看板</td></tr>
+    <tr><td>D21</td><td>缓冲日 + 内容审核：加入敏感词过滤中间件；确保AI不输出违规内容</td><td>合规版本</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h4>Week 4: 测试上线（目标：真实用户使用）</h4>
+  <table>
+    <tr><th>Day</th><th>任务</th><th>产出</th></tr>
+    <tr><td>D22</td><td>内测启动：找50个考研学生（考研群/小红书/即刻招募），赠送1个月免费会员换取使用反馈</td><td>内测用户群</td></tr>
+    <tr><td>D23</td><td>Bug收集+修复：根据内测反馈修bug（优先级：P0崩溃>P1数学公式渲染>P2 UI问题）</td><td>Bug修复版本</td></tr>
+    <tr><td>D24</td><td>阿里云部署：ECS实例 + Docker部署 + Nginx反向代理 + SSL证书 + OSS存储</td><td>生产环境</td></tr>
+    <tr><td>D25</td><td>域名配置：购买域名 + DNS解析 + 备案提交（备案可能需要2-3周，先上线再等）</td><td>域名就绪</td></tr>
+    <tr><td>D26</td><td>反馈迭代第二轮：根据内测反馈做最后调整；准备上线文案和推广素材</td><td>最终版本</td></tr>
+    <tr><td>D27</td><td>小红书/即刻/考研论坛推广帖子撰写 + 邀请码机制设计（老带新裂变）</td><td>推广素材</td></tr>
+    <tr><td>D28</td><td>正式上线发布！开始接受付费用户</td><td>🎉 上线</td></tr>
+  </table>
+</div>
+
+<!-- ====== 6. 部署架构 ====== -->
+<h2>六、部署与运维</h2>
+
+<h3>6.1 服务器配置建议</h3>
+
+<table>
+  <tr><th>阶段</th><th>配置</th><th>月成本</th><th>承载用户</th></tr>
+  <tr><td>MVP/内测</td><td>阿里云ECS 4C8G + 100G SSD</td><td>~¥300/月</td><td>200-500 DAU</td></tr>
+  <tr><td>冷启动期</td><td>阿里云ECS 8C16G + 200G SSD + OSS</td><td>~¥800/月</td><td>1000-3000 DAU</td></tr>
+  <tr><td>增长期</td><td>ECS 16C32G + OSS + RDS + Redis + SLB</td><td>~¥3000/月</td><td>5000-15000 DAU</td></tr>
+</table>
+
+<div class="insight">
+  <strong>省钱技巧：</strong>DeepTutor支持接入DeepSeek API（¥1/百万token），数学题目平均每次Deep Solve消耗约5000-15000 token = ¥0.005-0.015/题。一个月服务1000用户，假设每人每天做5道题，月度LLM成本仅¥75-225。对比用GPT-4o同场景要¥750-1500。<strong>用DeepSeek可以省90%LLM成本。</strong>
+</div>
+
+<h3>6.2 Docker Compose 生产部署脚本</h3>
+
+<div class="arch-diagram">
+# docker-compose.prod.yml — 白标版生产部署
+version: '3.8'
+services:
+  nginx:
+    image: nginx:alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on: [frontend, backend]
+
+  frontend:
+    image: ghcr.io/你的组织/deeptutor-frontend:latest  # 白标版镜像
+    environment:
+      - NEXT_PUBLIC_API_URL=https://api.你的域名.com
+      - NEXT_PUBLIC_BRAND_NAME=你的品牌名
+    ports: ["3782:3782"]
+
+  backend:
+    image: ghcr.io/你的组织/deeptutor-backend:latest  # 白标版镜像
+    environment:
+      - LLM_BINDING=deepseek
+      - LLM_MODEL=deepseek-chat
+      - LLM_API_KEY=${DEEPSEEK_API_KEY}
+      - EMBEDDING_BINDING=dashscope
+      - EMBEDDING_MODEL=text-embedding-v3
+      - EMBEDDING_API_KEY=${DASHSCOPE_API_KEY}
+      - WEB_SEARCH=duckduckgo
+      - JWT_SECRET=${JWT_SECRET}
+      - WECHAT_APP_ID=${WECHAT_APP_ID}
+      - WECHAT_APP_SECRET=${WECHAT_APP_SECRET}
+    ports: ["8001:8001"]
+    volumes:
+      - ./data:/app/data
+      - ./knowledge:/app/knowledge  # 预置知识库
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes: ["./qdrant_data:/qdrant/storage"]
+</div>
+
+<!-- ====== 7. 商业化 ====== -->
+<h2>七、商业模式与盈利预测</h2>
+
+<h3>7.1 定价策略</h3>
+
+<table>
+  <tr><th>方案</th><th>价格</th><th>权益</th><th>目标转化</th></tr>
+  <tr>
+    <td><strong>免费版</strong></td>
+    <td>¥0</td>
+    <td>10题/天、Chat模式、基础RAG问答</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td><strong>月卡</strong></td>
+    <td>¥29/月</td>
+    <td>无限提问、Deep Solve、Quiz生成、错题本</td>
+    <td>免费→付费 5%</td>
+  </tr>
+  <tr>
+    <td><strong>年卡</strong></td>
+    <td>¥199/年</td>
+    <td>月卡所有 + 估分系统 + 学习计划 + Math Animator + 优先新功能</td>
+    <td>月卡→年卡 30%</td>
+  </tr>
+  <tr>
+    <td><strong>终身卡</strong></td>
+    <td>¥499</td>
+    <td>年卡所有 + "终身更新"承诺 + 专属TutorBot</td>
+    <td>年卡→终身 10%</td>
+  </tr>
+</table>
+
+<h3>7.2 用户增长模型</h3>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="val">500</div><div class="lbl">首月注册（推广启动）</div></div>
+  <div class="kpi"><div class="val">25</div><div class="lbl">首月付费（5%转化）</div></div>
+  <div class="kpi"><div class="val">¥5,000</div><div class="lbl">首月收入（估）</div></div>
+  <div class="kpi"><div class="val">¥30K</div><div class="lbl">6月后MRR目标</div></div>
+  <div class="kpi"><div class="val">¥450K</div><div class="lbl">12月后ARR目标</div></div>
+</div>
+
+<h3>7.3 成本结构（月）</h3>
+
+<table>
+  <tr><th>项目</th><th>MVP阶段</th><th>1000用户阶段</th></tr>
+  <tr><td>服务器（阿里云ECS）</td><td>¥300</td><td>¥800</td></tr>
+  <tr><td>DeepSeek API</td><td>¥50-200</td><td>¥300-800</td></tr>
+  <tr><td>域名+SSL</td><td>¥60/年</td><td>¥60/年</td></tr>
+  <tr><td>OSS存储</td><td>¥10</td><td>¥50</td></tr>
+  <tr><td>微信支付手续费</td><td>0.6%</td><td>0.6%</td></tr>
+  <tr><td><strong>合计</strong></td><td><strong>~¥400-550/月</strong></td><td><strong>~¥1200-1800/月</strong></td></tr>
+</table>
+
+<div class="success">
+  <strong>盈亏平衡点：</strong>月成本¥550 ÷ 客单价¥199/年 ≈ 每月只需<strong>33个付费用户</strong>即覆盖全部运营成本。33个付费用户在考研人群中只需触达约<strong>660个注册用户</strong>（5%转化率）。这个数字在考研社群中通过2-3篇爆款小红书笔记即可达到。
+</div>
+
+<!-- ====== 8. 风险 ====== -->
+<h2>八、风险与应对</h2>
+
+<table>
+  <tr><th>风险</th><th>概率</th><th>影响</th><th>应对</th></tr>
+  <tr>
+    <td>DeepTutor上游架构大改，合并冲突</td>
+    <td>中</td>
+    <td>中</td>
+    <td>Fork后锁定版本，不追最新。只在修复安全漏洞时合并上游。</td>
+  </tr>
+  <tr>
+    <td>DeepSeek API不稳定/涨价</td>
+    <td>低</td>
+    <td>高</td>
+    <td>保留通义千问作为热备；本地部署Qwen3-8B作为极端情况兜底。</td>
+  </tr>
+  <tr>
+    <td>字节/好未来推出类似免费产品</td>
+    <td>高</td>
+    <td>高</td>
+    <td>差异化在内容深度（考研垂直）而非通用能力；建立微信群私域壁垒；快速积累错题数据形成数据飞轮。</td>
+  </tr>
+  <tr>
+    <td>AI输出数学错误答案</td>
+    <td>中</td>
+    <td>高</td>
+    <td>DeepTutor的CheckAgent本身做验证；加强提示词"不确定时主动声明"；每道AI解答标注"AI生成，仅供参考"。</td>
+  </tr>
+  <tr>
+    <td>国内备案/合规问题</td>
+    <td>中</td>
+    <td>高</td>
+    <td>使用国内服务器+ICP备案；接入敏感词过滤；明确产品定位为"学习辅助工具"而非"教育机构"。</td>
+  </tr>
+  <tr>
+    <td>用户数据泄露</td>
+    <td>低</td>
+    <td>极高</td>
+    <td>JWT+HTTPS+数据库加密；不存储用户明文密码；定期安全审计。</td>
+  </tr>
+</table>
+
+<!-- ====== 9. 关键决策 ====== -->
+<h2>九、关键决策检查清单</h2>
+
+<div class="card accent">
+  <h4 style="margin-top:0;">上线前必须确认的事项</h4>
+  <ul class="checklist">
+    <li><strong>产品名称</strong> 最终选定（数研助手 / 题深 / 解牛AI / 其他）</li>
+    <li><strong>域名</strong> 已购买 + DNS解析完成 + ICP备案提交</li>
+    <li><strong>服务器</strong> 阿里云ECS实例创建 + SSH配置 + Docker环境就绪</li>
+    <li><strong>LLM API Key</strong> DeepSeek充值 + 通义千问备用Key配置</li>
+    <li><strong>微信开放平台</strong> 应用创建 + AppID/AppSecret获取 + OAuth回调配置</li>
+    <li><strong>微信支付</strong> 商户号申请 + API密钥配置 + JSAPI支付权限开通</li>
+    <li><strong>知识图谱</strong> 考研数学知识图谱完成 + 导入系统验证</li>
+    <li><strong>真题库</strong> 近10年真题PDF导入Knowledge Hub + RAG检索测试通过</li>
+    <li><strong>中文Prompt</strong> 6个Agent的System Prompt翻译+考研领域适配完成</li>
+    <li><strong>DeepTutor License</strong> Apache 2.0 版权声明保留在代码中 + 关于页面标注</li>
+    <li><strong>内容审核</strong> 敏感词过滤中间件部署 + 测试通过</li>
+    <li><strong>内测用户</strong> 50人考研学生群建立 + 邀请码发放</li>
+  </ul>
+</div>
+
+<!-- ====== 10. 附录 ====== -->
+<h2>十、附录：核心技术参考</h2>
+
+<h3>10.1 DeepTutor 关键文件路径</h3>
+
+<div class="arch-diagram">
+DeepTutor/
+├── src/
+│   ├── agents/
+│   │   ├── solve/          # MainSolver — Deep Solve入口
+│   │   │   ├── investigate.py  # InvestigateAgent
+│   │   │   ├── plan.py         # PlanAgent
+│   │   │   ├── solve.py        # SolveAgent
+│   │   │   └── check.py        # CheckAgent
+│   │   ├── question/       # AgentCoordinator — Quiz生成
+│   │   ├── research/       # Deep Research Agent
+│   │   └── prompts/        # 🔴 所有System Prompt（重点修改）
+│   ├── api/
+│   │   └── run_server.py   # FastAPI 入口
+│   ├── rag/                # LlamaIndex RAG 引擎
+│   └── knowledge/          # Knowledge Hub 管理
+├── web/
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx         # 🔴 首页（重点修改）
+│   │   │   ├── layout.tsx       # 🔴 全局布局
+│   │   │   └── chat/            # 🔴 Chat页面
+│   │   └── components/
+│   │       ├── Sidebar.tsx      # 🔴 侧边栏导航
+│   │       ├── ChatInput.tsx    # 🔴 输入框
+│   │       └── ...
+│   ├── tailwind.config.ts       # 🔴 配色系统
+│   └── public/                  # 🔴 Logo/Favicon
+├── docker-compose.ghcr.yml      # Docker部署
+├── .env.example                 # 🔴 环境变量模板
+└── LICENSE                      # Apache 2.0
+</div>
+
+<h3>10.2 核心 .env 配置（白标版）</h3>
+
+<div class="arch-diagram">
+# ====== LLM配置 ======
+LLM_BINDING=deepseek
+LLM_MODEL=deepseek-chat
+LLM_API_KEY=sk-xxxxxxxx
+LLM_HOST=https://api.deepseek.com/v1
+LLM_MAX_TOKENS=8192
+
+# 备用LLM（当DeepSeek不可用时自动切换）
+FALLBACK_LLM_BINDING=dashscope
+FALLBACK_LLM_MODEL=qwen-plus
+FALLBACK_LLM_API_KEY=sk-xxxxxxxx
+
+# ====== Embedding配置 ======
+EMBEDDING_BINDING=dashscope
+EMBEDDING_MODEL=text-embedding-v3
+EMBEDDING_API_KEY=sk-xxxxxxxx
+
+# ====== 网络搜索 ======
+WEB_SEARCH=duckduckgo   # 免费方案
+
+# ====== 多用户认证 ======
+ENABLE_AUTH=true
+JWT_SECRET=生成一个随机字符串
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=强密码
+
+# ====== 微信集成 ======
+WECHAT_APP_ID=wx_app_id
+WECHAT_APP_SECRET=wx_app_secret
+WECHAT_PAY_MCH_ID=商户号
+WECHAT_PAY_API_KEY=支付密钥
+
+# ====== 品牌配置 ======
+BRAND_NAME=数研助手
+BRAND_SLOGAN=你的AI考研数学老师
+PRIMARY_COLOR=#4F46E5
+</div>
+
+<h3>10.3 快速启动命令备忘</h3>
+
+<div class="arch-diagram">
+# === 第1步：Fork + 克隆 ===
+git clone https://github.com/你的组织/数研助手.git
+cd 数研助手
+
+# === 第2步：配置环境变量 ===
+cp .env.example .env
+# 编辑 .env 填入上述配置
+
+# === 第3步：Docker部署 ===
+docker compose -f docker-compose.ghcr.yml up -d
+
+# === 第4步：导入知识库 ===
+python scripts/import_kaoyan_math.py  # 自建导入脚本
+# 或者通过Web UI手动上传真题PDF到Knowledge Hub
+
+# === 第5步：验证 ===
+# 浏览器打开 http://localhost:3782
+# 测试：输入"求极限 lim(x→0) sin(x)/x"，看Deep Solve模式输出
+
+# === 第6步：自定义Docker镜像构建 ===
+docker build -t 你的组织/数研助手:latest .
+docker push 你的组织/数研助手:latest
+</div>
+
+<div class="success" style="margin-top: 32px;">
+  <strong>核心结论：</strong>DeepTutor是目前最适合白标化的开源教育AI平台。Apache 2.0协议商业友好，双循环多Agent架构是真正的技术壁垒（非简单ChatGPT套壳），30+LLM Provider支持让中国化部署零门槛（DeepSeek+通义千问即插即用），Docker一键部署让运维成本归零。<br><br>
+  <strong>4周内你可以拥有一个：</strong>品牌独立、中文原生、考研数学专精、支持Deep Solve逐步解题+Math Animator动画演示+Quiz自动出题+错题本FSRS复习+蒙特卡洛估分的完整AI辅导产品。<br><br>
+  <strong>所需投入：</strong>服务器¥300/月 + LLM API ¥50-200/月 + 你自己的开发时间（全职4周）。<br>
+  <strong>盈亏平衡：</strong>33个付费用户。
+</div>
+
+<div style="text-align: center; padding: 40px 20px; color: var(--text2); font-size: 0.82rem;">
+  <p>DeepTutor 白标产品设计文档 v1.0</p>
+  <p>基于 HKUDS/DeepTutor (Apache 2.0 License) · 2026-05-31</p>
+  <p>上游仓库：<a href="https://github.com/HKUDS/DeepTutor">github.com/HKUDS/DeepTutor</a></p>
+</div>
+
+</body>
+</html>
