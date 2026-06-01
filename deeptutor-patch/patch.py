@@ -149,11 +149,126 @@ CHAT_NEW = (
 assert ci.count(CHAT_OLD) == 1, "chat _get_session_manager anchor not found/ambiguous — upstream changed"
 open(chat_router_f, "w", encoding="utf-8").write(ci.replace(CHAT_OLD, CHAT_NEW))
 
+# 8) [P3 face-A de-affinity] In multi-replica mode (DEEPTUTOR_PG_DSN set), let a
+#    NON-owning replica/worker stream a turn by tailing the shared seq'd event log
+#    instead of killing it as an "orphan" (turn_runtime's process-local execution
+#    check). Removes the single-session-single-process constraint for the streaming
+#    path. Default (no shared store) keeps the original fast orphan-fail — zero
+#    behaviour change. (submit_user_reply / cancel still reach the owning process;
+#    cross-process forwarding via Redis is the P3b follow-up.)
+tr_f = f"{ROOT}/services/session/turn_runtime.py"
+tr = open(tr_f, encoding="utf-8").read()
+
+P3_BLOCK_OLD = """        turn = await self.store.get_turn(turn_id)
+        if execution is None:
+            turn = await self._fail_orphan_running_turn(turn)
+            if turn is None or turn.get("status") != "running":
+                # Turn already finished and we didn't see a DONE in any of the
+                # persisted history above — synthesise one so the caller can
+                # still close out its streaming state cleanly.
+                if not done_yielded:
+                    if turn is not None and str(turn.get("status") or "") == "failed":
+                        error_event = self._synthesize_error_event(turn_id, turn)
+                        if error_event is not None:
+                            yield error_event
+                    yield self._synthesize_done_event(turn_id, turn)
+                return"""
+
+P3_BLOCK_NEW = """        turn = await self.store.get_turn(turn_id)
+        if execution is None:
+            import os as _os
+            # P3 face-A de-affinity (multi-replica only): with a shared store, a
+            # turn that has no LOCAL execution may be running on another replica/
+            # worker. Tail its persisted seq'd event log rather than killing it as
+            # an orphan. Without a shared store (single process) keep the original
+            # fast orphan-fail — zero behaviour change by default.
+            if (
+                _os.environ.get("DEEPTUTOR_PG_DSN")
+                and turn is not None
+                and str(turn.get("status") or "") == "running"
+            ):
+                async for _item in self._tail_foreign_turn(turn_id, last_seq, done_yielded):
+                    yield _track(_item)
+                return
+            turn = await self._fail_orphan_running_turn(turn)
+            if turn is None or turn.get("status") != "running":
+                # Turn already finished and we didn't see a DONE in any of the
+                # persisted history above — synthesise one so the caller can
+                # still close out its streaming state cleanly.
+                if not done_yielded:
+                    if turn is not None and str(turn.get("status") or "") == "failed":
+                        error_event = self._synthesize_error_event(turn_id, turn)
+                        if error_event is not None:
+                            yield error_event
+                    yield self._synthesize_done_event(turn_id, turn)
+                return"""
+
+assert tr.count(P3_BLOCK_OLD) == 1, "turn_runtime orphan-handling anchor not found — upstream changed"
+tr = tr.replace(P3_BLOCK_OLD, P3_BLOCK_NEW)
+
+P3_TAIL_METHOD = '''    async def _tail_foreign_turn(
+        self, turn_id: str, after_seq: int, already_done: bool
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream a turn this process does NOT own by tailing the shared event log.
+
+        Lets a replica/worker serve a subscription for a turn running elsewhere
+        (P3 de-affinity). append_turn_event bumps turns.updated_at on every event,
+        so a live turn stays fresh even mid-stream; only a turn whose owner died
+        goes stale and is failed — the old orphan semantics, but by real staleness
+        instead of process-locality. (A proper owner heartbeat/lease is P3b.)
+        """
+        import time as _time
+
+        last_seq = after_seq
+        saw_done = already_done
+        poll_interval = 0.4
+        stale_after = 120.0
+        while True:
+            events = await self.store.get_turn_events(turn_id, after_seq=last_seq)
+            for ev in events:
+                seq = int(ev.get("seq") or 0)
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                if str(ev.get("type") or "") == "done":
+                    saw_done = True
+                yield ev
+                if saw_done:
+                    return
+            turn = await self.store.get_turn(turn_id)
+            status = str((turn or {}).get("status") or "")
+            if turn is None or status in ("completed", "failed", "cancelled"):
+                if not saw_done:
+                    if status == "failed":
+                        err = self._synthesize_error_event(turn_id, turn)
+                        if err is not None:
+                            yield err
+                    yield self._synthesize_done_event(turn_id, turn)
+                return
+            updated = float((turn or {}).get("updated_at") or 0.0)
+            if updated and (_time.time() - updated) > stale_after:
+                await self.store.update_turn_status(turn_id, "failed", _INTERRUPTED_TURN_ERROR)
+                failed = await self.store.get_turn(turn_id)
+                err = self._synthesize_error_event(turn_id, failed)
+                if err is not None:
+                    yield err
+                yield self._synthesize_done_event(turn_id, failed)
+                return
+            await asyncio.sleep(poll_interval)
+
+'''
+
+P3_INSERT_ANCHOR = "    async def subscribe_session(\n"
+assert tr.count(P3_INSERT_ANCHOR) == 1, "subscribe_session anchor not found — upstream changed"
+tr = tr.replace(P3_INSERT_ANCHOR, P3_TAIL_METHOD + P3_INSERT_ANCHOR)
+open(tr_f, "w", encoding="utf-8").write(tr)
+
 print(
     f"patched ok: verbose removed, {count} vision construction site(s) updated, "
     "backend launcher -> gunicorn(UvicornWorker, WEB_CONCURRENCY), "
     f"overlay files: {len(overlay_copied)} ({', '.join(overlay_copied) or 'none'}), "
     "get_session_store -> Postgres when DEEPTUTOR_PG_DSN set, "
     "TutorBot auto-start gated by DEEPTUTOR_ROLE, "
-    "chat session persistence -> shared store when DEEPTUTOR_PG_DSN set"
+    "chat session persistence -> shared store when DEEPTUTOR_PG_DSN set, "
+    "face-A turn streaming de-affinitized (tail shared log) in multi-replica mode"
 )

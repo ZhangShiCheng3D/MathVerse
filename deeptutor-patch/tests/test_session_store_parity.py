@@ -245,3 +245,39 @@ async def test_list_sessions_counts_and_last_message(store):
     assert row["message_count"] == 2
     assert row["last_message"] == "last"
     assert row["status"] == "idle"
+
+
+# ── P3: face-A de-affinity (Postgres-only; needs DEEPTUTOR_PG_DSN) ─────────────
+
+async def test_p3_tail_foreign_turn_streams_without_failing(tmp_path, monkeypatch):
+    """Regression for the P3 fix: a replica that does NOT own a turn's execution
+    must STREAM it by tailing the shared event log — never mark it failed (the old
+    orphan-kill). Drives TurnRuntimeManager._tail_foreign_turn directly against a
+    shared Postgres store, deterministically (terminal event pre-appended)."""
+    if not os.environ.get("DEEPTUTOR_PG_DSN"):
+        pytest.skip("DEEPTUTOR_PG_DSN not set — P3 tail test is Postgres-only")
+    monkeypatch.setenv("DEEPTUTOR_PG_DSN", os.environ["DEEPTUTOR_PG_DSN"])
+    try:
+        from deeptutor.services.session.turn_runtime import TurnRuntimeManager
+    except Exception as exc:  # pragma: no cover - only in a full deeptutor env
+        pytest.skip(f"deeptutor package not importable here: {exc}")
+
+    store = await _make_postgres_store(tmp_path)
+    mgr = TurnRuntimeManager(store=store)  # fresh manager => owns NO executions
+
+    sess = await store.create_session()
+    sid = sess["session_id"]
+    turn = await store.create_turn(sid)
+    tid = turn["id"]
+    # A live event, then a terminal one, then mark the turn done — simulating a
+    # turn that ran (and finished) on a DIFFERENT replica.
+    await store.append_turn_event(tid, {"type": "stream", "content": "partial"})
+    await store.append_turn_event(tid, {"type": "done", "content": ""})
+    await store.update_turn_status(tid, "completed")
+
+    out = []
+    async for ev in mgr._tail_foreign_turn(tid, after_seq=0, already_done=False):
+        out.append(ev)
+
+    assert [e["type"] for e in out] == ["stream", "done"]   # streamed the foreign turn
+    assert (await store.get_turn(tid))["status"] == "completed"   # NOT failed as orphan
