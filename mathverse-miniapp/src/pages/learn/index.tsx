@@ -19,8 +19,8 @@ const masteryColor = (m: number) => {
 
 export default function LearnPage() {
   const {
-    stage, setStage, kgData, selectedKp, lecture, activeTab,
-    isLoading, fetchKg, selectKp, fetchLecture,
+    stage, setStage, kgData, selectedKp, lecture, exercises, activeTab,
+    isLoading, fetchKg, selectKp, fetchLecture, fetchExercise,
   } = useLearnStore();
 
   useEffect(() => {
@@ -148,7 +148,7 @@ export default function LearnPage() {
             color: activeTab === 'exercise' ? '#fff' : '#374151',
             border: activeTab === 'exercise' ? 'none' : '1px solid #d1d5db',
           }}
-          onClick={() => useLearnStore.setState({ activeTab: 'exercise' })}
+          onClick={() => fetchExercise(selectedKp.name, selectedKp.id)}
         >
           练习
         </Button>
@@ -170,8 +170,33 @@ export default function LearnPage() {
       )}
 
       {activeTab === 'exercise' && (
-        <View style={{ padding: '16px' }}>
-          <Text style={{ color: '#9ca3af' }}>练习功能即将上线</Text>
+        <View>
+          {isLoading ? (
+            <Text style={{ color: '#9ca3af' }}>AI正在出题...</Text>
+          ) : exercises.length ? (
+            exercises.map((q, i) => (
+              <View key={i} style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '12px', marginBottom: '12px' }}>
+                <Text style={{ fontSize: '15px', fontWeight: '600', display: 'block' }}>
+                  {i + 1}. {q.question}
+                </Text>
+                {q.options?.map((opt, j) => (
+                  <Text key={j} style={{ fontSize: '14px', color: '#374151', display: 'block', marginTop: '6px' }}>
+                    {opt}
+                  </Text>
+                ))}
+                <Text style={{ fontSize: '14px', color: '#4F46E5', display: 'block', marginTop: '8px' }}>
+                  答案：{q.answer}
+                </Text>
+                {q.analysis && (
+                  <Text style={{ fontSize: '13px', color: '#6b7280', display: 'block', marginTop: '4px', lineHeight: '1.6' }}>
+                    解析：{q.analysis}
+                  </Text>
+                )}
+              </View>
+            ))
+          ) : (
+            <Text style={{ color: '#9ca3af' }}>点击"练习"开始做题</Text>
+          )}
         </View>
       )}
     </ScrollView>

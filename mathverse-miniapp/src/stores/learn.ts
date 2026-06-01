@@ -19,17 +19,27 @@ interface KgSubject {
   }[];
 }
 
+interface Question {
+  type: string;
+  question: string;
+  options?: string[];
+  answer: string;
+  analysis?: string;
+}
+
 interface LearnStore {
   stage: string;
   kgData: KgSubject[] | null;
   selectedKp: KgNode | null;
   lecture: string;
+  exercises: Question[];
   activeTab: 'lecture' | 'exercise';
   isLoading: boolean;
   setStage: (stage: string) => void;
   fetchKg: () => Promise<void>;
   selectKp: (kp: KgNode) => void;
   fetchLecture: (kpName: string, kpId: string) => Promise<void>;
+  fetchExercise: (kpName: string, kpId: string) => Promise<void>;
 }
 
 export const useLearnStore = create<LearnStore>((set, get) => ({
@@ -37,10 +47,11 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
   kgData: null,
   selectedKp: null,
   lecture: '',
+  exercises: [],
   activeTab: 'lecture',
   isLoading: false,
 
-  setStage: (stage) => set({ stage, selectedKp: null, lecture: '' }),
+  setStage: (stage) => set({ stage, selectedKp: null, lecture: '', exercises: [] }),
 
   fetchKg: async () => {
     set({ isLoading: true });
@@ -54,7 +65,7 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
     }
   },
 
-  selectKp: (kp) => set({ selectedKp: kp, lecture: '', activeTab: 'lecture' }),
+  selectKp: (kp) => set({ selectedKp: kp, lecture: '', exercises: [], activeTab: 'lecture' }),
 
   fetchLecture: async (kpName, kpId) => {
     set({ isLoading: true });
@@ -64,6 +75,19 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
         data: { kp_name: kpName, kp_id: kpId, stage: get().stage },
       });
       set({ lecture: data.lecture, isLoading: false, activeTab: 'lecture' });
+    } catch {
+      set({ isLoading: false });
+    }
+  },
+
+  fetchExercise: async (kpName, kpId) => {
+    set({ isLoading: true, activeTab: 'exercise', exercises: [] });
+    try {
+      const data = await request<{ questions: Question[] }>('/api/learn/exercise/generate', {
+        method: 'POST',
+        data: { kp_name: kpName, kp_id: kpId, stage: get().stage, count: 3 },
+      });
+      set({ exercises: data.questions, isLoading: false });
     } catch {
       set({ isLoading: false });
     }
