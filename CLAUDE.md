@@ -17,7 +17,7 @@ The AI reasoning runs in an **external DeepTutor service** (`ghcr.io/hkuds/deept
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8002
-pytest                                          # all tests (65 currently, all green)
+pytest                                          # all tests (79 currently, all green)
 pytest tests/test_solve.py                      # one file
 pytest tests/test_agent_client.py::test_deep_solve_parses_structured_json   # one test
 ```
@@ -101,6 +101,41 @@ Work lives on branch **`improve/design-review-hardening`** → **PR #1** (`Zhang
 5. **Deployment** — full stack live at `https://kuangyebar.cn` (see Deployment section).
 
 Design docs (HTML, per repo convention all docs are HTML): `docs/mathverse-design-review-20260601.html` (graded review + fix progress) and `docs/mathverse-design-optimization-20260601.html` (DeepTutor-grounded design optimization: reuse-vs-build matrix, verified endpoint-contract appendix, AgentClient v2 blueprint).
+
+## High-concurrency optimization of DeepTutor — branch `feat/deeptutor-high-concurrency`, PR #2
+
+Systematic optimization of the **upstream DeepTutor engine** toward ~10k concurrency + horizontal scaling. Grounded in DeepTutor's real source (a curated copy lives at `Desktop/deeptutor-src-analysis/`, **outside** the repo — re-fetch via `gh api` if gone). Design rationale: `docs/deeptutor-high-concurrency-optimization-20260602.html`; operator rollout guide: `docs/deeptutor-high-concurrency-rollout-runbook-20260602.html`.
+
+**The two concurrency surfaces (do not conflate):** DeepTutor exposes (A) `unified_ws` `/api/v1/ws` (turn-runtime, used by DeepTutor's own frontend) and (B) `/api/v1/chat` + `/vision/solve` + `/question/judge` (**the path MathVerse uses**, via `deeptutor_ws.py`). They have different statefulness and were optimized separately.
+
+**Delivery = build-time patch overlay, never a fork.** `deeptutor-patch/` rewrites files inside the upstream image at build time (wired via `docker-compose.override.yml` `deeptutor.build: ./deeptutor-patch`):
+- `deeptutor-patch/patch.py` — sequential edits **§1-9**, each one `assert`s its anchor is present & unique so an upstream change **fails the build loudly** instead of shipping an unpatched image. §1-2 = pre-existing vision fixes; §3-9 = high-concurrency.
+- `deeptutor-patch/overlay/` — **new** module files copied into the image (mirrors `/app/...` layout). patch.py asserts each overlay target does *not* already exist (never clobbers upstream).
+- `deeptutor-patch/Dockerfile` — `pip install gunicorn asyncpg redis`, then runs patch.py.
+- `deeptutor-patch/tests/test_session_store_parity.py` — SQLite↔Postgres parity + P3a/P3b regression. Runs **inside the built image**; the Postgres/Redis tests skip without `DEEPTUTOR_PG_DSN`/`DEEPTUTOR_REDIS_URL`.
+
+**Everything is env-gated; every default = current behaviour** (safe to merge; turn features on one at a time, rollback = unset the env). Knobs on the **DeepTutor** container unless noted:
+
+| Env | Default | Effect |
+|---|---|---|
+| `WEB_CONCURRENCY` | `1` | gunicorn worker count (P0). **Keep 1 until PG + de-affinity are on.** |
+| `DEEPTUTOR_PG_DSN` | unset | Route session/turn/event state to shared Postgres, faces A+B (P1); also enables P3a tailing. |
+| `DEEPTUTOR_REDIS_URL` | unset | P3b: face-A streaming via Redis pub/sub + cross-replica reply/cancel forwarding. |
+| `DEEPTUTOR_ROLE` | `all` | `web` (no TutorBot auto-start) / `bot` (run exactly 1) — P2. |
+| `DEEPTUTOR_MAX_CONCURRENCY` (on `mathverse-api`) | `64` | P-MV admission cap. |
+
+**Phase map (what each part does):**
+- **P0** launcher → gunicorn+UvicornWorker (`§3`); k6 WS load test in `load-tests/`.
+- **P1** `overlay/.../session/postgres_store.py` = `PostgresSessionStore` (asyncpg pool, implements `SessionStoreProtocol`, removes the SQLite store's per-op global `asyncio.Lock`; per-turn advisory lock for event `seq`); `get_session_store()` selects it via DSN (`§5`). Face-B `/api/v1/chat` externalized via `overlay/.../chat/_pg_session_manager.py` — a sync-over-async bridge with its **own** pool on a dedicated background loop (asyncpg pools are event-loop-bound, so it must **not** reuse the main-loop store singleton that turn-runtime uses; `§7`).
+- **P2** `gateway/` = LiteLLM multi-account gateway (global rate-limit/LB/retry; DeepTutor just repoints `model_catalog.json` `base_url`, zero code change — the gateway owns global limiting so DeepTutor's in-process `traffic_control.py` stays a per-replica bulkhead); TutorBot ROLE gating (`§6`); `k8s/` = parameterized kustomize base.
+- **P3** `§8` makes `subscribe_turn` **tail the shared seq'd event log** instead of orphan-killing a turn it doesn't own (P3a, polling); `overlay/.../session/_turn_bus.py` + `§9` replace polling with Redis pub/sub and forward `submit_user_reply`/`cancel_turn` to the owning replica (P3b). Together face A is fully de-affinitized.
+- **P-MV** `mathverse-api` `AgentClient._guarded` admission gate: saturation → `AgentUnavailableError` (no circuit-breaker failure) → existing DeepSeek degrade path. No route changes.
+
+**Verification status:** **P-MV is the only part tested end-to-end here (79/79 pytest).** All DeepTutor-side patches are **static-verified only** (anchors unique, generated bash valid, every patched file compiles, YAML parses) — the build + Postgres/Redis/k8s must be validated in a real env per the runbook (Stages 0-5).
+
+**Invariant to preserve:** never raise `WEB_CONCURRENCY>1` or add replicas for face A **without** `DEEPTUTOR_PG_DSN` set — otherwise `turn_runtime` marks cross-worker/replica turns as orphans and **kills them** (the exact bug P3a/P3b fix, and only in multi-replica mode). The orphan-kill is in `turn_runtime.subscribe_turn` / `_fail_orphan_running_turn`.
+
+**Only remaining residual:** outputs → object storage (`deeptutor/api/main.py:258` `/api/outputs` static mount on local disk isn't shared across replicas). Only matters for DeepTutor visualize/animation artifacts, which MathVerse doesn't consume — deferred.
 
 ## Deployment (LIVE)
 
