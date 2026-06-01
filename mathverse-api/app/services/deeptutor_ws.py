@@ -42,6 +42,14 @@ def _ws_base() -> str:
     return url
 
 
+def _as_data_uri(b64: str) -> str:
+    """DeepTutor's vision decoder rejects bare base64 — it wants a data URI."""
+    if b64.startswith("data:"):
+        return b64
+    mime = "image/png" if b64.startswith("iVBOR") else "image/jpeg"
+    return f"data:{mime};base64,{b64}"
+
+
 async def _stream(path: str, request: dict, timeout: float):
     """Connect, send the request, yield each received JSON event.
 
@@ -88,7 +96,7 @@ async def vision_solve(question: str, image_base64: str | None = None,
     """WS /api/v1/vision/solve — photo/text math solving, aggregate text until done."""
     req: dict = {"question": question}
     if image_base64:
-        req["image_base64"] = image_base64
+        req["image_base64"] = _as_data_uri(image_base64)
     if image_url:
         req["image_url"] = image_url
     if session_id:

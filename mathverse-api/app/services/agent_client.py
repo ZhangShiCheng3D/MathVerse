@@ -155,7 +155,11 @@ class AgentClient:
         data = await self._guarded(
             deeptutor_ws.vision_solve(question, image_base64=image_base64, timeout=120.0)
         )
-        return data["answer"]
+        answer = (data.get("answer") or "").strip()
+        if not answer:
+            # Engine accepted the image but produced nothing (e.g. vision agent error).
+            raise AgentUnavailableError("vision returned an empty answer")
+        return answer
 
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
         """Generate prose via DeepTutor chat WS (mode=chat), with a prompt template as system preamble."""

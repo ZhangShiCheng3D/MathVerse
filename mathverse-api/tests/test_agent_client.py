@@ -82,6 +82,16 @@ async def test_vision_solve_uses_vision_ws():
 
 
 @pytest.mark.asyncio
+async def test_vision_solve_empty_answer_raises():
+    """Engine accepted the image but produced nothing -> treat as unavailable, not a blank 200."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.vision_solve", new_callable=AsyncMock) as mock_vision:
+        mock_vision.return_value = {"answer": "   "}
+        with pytest.raises(AgentUnavailableError):
+            await client.vision_solve("解这题", "ZmFrZQ==")
+
+
+@pytest.mark.asyncio
 async def test_generate_quiz_uses_chat_ws_and_parses_json():
     """Regression: quiz goes through chat WS (mode=quiz), parsing the JSON question block."""
     client = AgentClient("http://mock:8001")

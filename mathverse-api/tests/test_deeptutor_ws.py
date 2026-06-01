@@ -13,6 +13,13 @@ from app.config import settings
 from app.services import deeptutor_ws
 
 
+def test_as_data_uri_wraps_bare_base64():
+    # PNG magic -> image/png; otherwise jpeg; existing data URIs pass through.
+    assert deeptutor_ws._as_data_uri("iVBORw0KGgo").startswith("data:image/png;base64,iVBOR")
+    assert deeptutor_ws._as_data_uri("/9j/abc").startswith("data:image/jpeg;base64,")
+    assert deeptutor_ws._as_data_uri("data:image/png;base64,x") == "data:image/png;base64,x"
+
+
 async def _serve(monkeypatch, handler):
     server = await websockets.serve(handler, "localhost", 0)
     port = server.sockets[0].getsockname()[1]
@@ -86,7 +93,8 @@ async def test_judge_aggregates_until_done(monkeypatch):
 async def test_vision_solve_aggregates(monkeypatch):
     async def handler(ws):
         req = json.loads(await ws.recv())
-        assert req["image_base64"] == "BASE64"
+        # client normalizes bare base64 into a data URI for DeepTutor's decoder
+        assert req["image_base64"] == "data:image/jpeg;base64,BASE64"
         await ws.send(json.dumps({"type": "session", "session_id": "v1"}))
         await ws.send(json.dumps({"type": "text", "content": "x = "}))
         await ws.send(json.dumps({"type": "text", "content": "1"}))
