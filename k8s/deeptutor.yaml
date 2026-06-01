@@ -65,6 +65,8 @@ spec:
               value: "web"                 # no TutorBot auto-start on web replicas
             - name: DEEPTUTOR_PG_DSN
               valueFrom: { secretKeyRef: { name: app-secrets, key: DEEPTUTOR_PG_DSN } }
+            - name: DEEPTUTOR_REDIS_URL          # P3b: cross-replica turn bus
+              value: "redis://redis:6379/0"
             - name: ENABLE_AUTH
               value: "false"               # internal-only; edge is mathverse-api
           volumeMounts:
@@ -126,6 +128,8 @@ spec:
               value: "bot"
             - name: DEEPTUTOR_PG_DSN
               valueFrom: { secretKeyRef: { name: app-secrets, key: DEEPTUTOR_PG_DSN } }
+            - name: DEEPTUTOR_REDIS_URL          # P3b: cross-replica turn bus
+              value: "redis://redis:6379/0"
             - name: ENABLE_AUTH
               value: "false"
           volumeMounts:

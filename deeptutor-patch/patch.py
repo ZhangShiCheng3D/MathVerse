@@ -217,6 +217,27 @@ P3_TAIL_METHOD = '''    async def _tail_foreign_turn(
         goes stale and is failed — the old orphan semantics, but by real staleness
         instead of process-locality. (A proper owner heartbeat/lease is P3b.)
         """
+        from deeptutor.services.session import _turn_bus as _bus
+        if _bus.enabled():
+            # P3b: stream via Redis pub/sub instead of polling (lower latency,
+            # less DB load). _bus.tail yields real events only; synthesise a
+            # terminal DONE here if the bus ends without one.
+            saw_done = already_done
+            async for _ev in _bus.tail(turn_id, after_seq, self.store):
+                if str(_ev.get("type") or "") == "done":
+                    saw_done = True
+                yield _ev
+                if saw_done:
+                    return
+            if not saw_done:
+                final = await self.store.get_turn(turn_id)
+                if str((final or {}).get("status") or "") == "failed":
+                    err = self._synthesize_error_event(turn_id, final)
+                    if err is not None:
+                        yield err
+                yield self._synthesize_done_event(turn_id, final)
+            return
+
         import time as _time
 
         last_seq = after_seq
@@ -263,6 +284,124 @@ assert tr.count(P3_INSERT_ANCHOR) == 1, "subscribe_session anchor not found — 
 tr = tr.replace(P3_INSERT_ANCHOR, P3_TAIL_METHOD + P3_INSERT_ANCHOR)
 open(tr_f, "w", encoding="utf-8").write(tr)
 
+# 9) [P3b] Redis pub/sub bus: cross-replica live streaming (the _tail_foreign_turn
+#    fast-path above) + cross-process submit_user_reply/cancel forwarding to the
+#    owning replica. Gated by DEEPTUTOR_REDIS_URL — unset => all inert, P3a polling
+#    stays. Re-read the (P3a-patched) file and apply five thin delegations.
+tr = open(tr_f, encoding="utf-8").read()
+
+# 9a) Owner fans each live event out to Redis (best-effort) in _publish_live_event.
+EMIT_OLD = (
+    "        for subscriber in subscribers:\n"
+    "            with contextlib.suppress(asyncio.QueueFull):\n"
+    "                subscriber.queue.put_nowait(payload)\n"
+    "        return payload"
+)
+EMIT_NEW = (
+    "        for subscriber in subscribers:\n"
+    "            with contextlib.suppress(asyncio.QueueFull):\n"
+    "                subscriber.queue.put_nowait(payload)\n"
+    "        from deeptutor.services.session import _turn_bus as _bus  # P3b fanout\n"
+    "        if _bus.enabled():\n"
+    "            await _bus.publish_event(execution.turn_id, payload)\n"
+    "        return payload"
+)
+assert tr.count(EMIT_OLD) == 1, "turn_runtime _publish_live_event tail anchor not found — upstream changed"
+tr = tr.replace(EMIT_OLD, EMIT_NEW)
+
+# 9b) submit_user_reply forwards to the owner when this replica isn't it.
+REPLY_OLD = (
+    "        queue = self._reply_queues.get(turn_id)\n"
+    "        if queue is None:\n"
+    "            return False"
+)
+REPLY_NEW = (
+    "        queue = self._reply_queues.get(turn_id)\n"
+    "        if queue is None:\n"
+    "            from deeptutor.services.session import _turn_bus as _bus  # P3b\n"
+    "            if _bus.enabled():\n"
+    "                return await _bus.publish_control(\n"
+    '                    turn_id, {"action": "reply", "text": text or "", "answers": answers}\n'
+    "                ) > 0\n"
+    "            return False"
+)
+assert tr.count(REPLY_OLD) == 1, "turn_runtime submit_user_reply anchor not found — upstream changed"
+tr = tr.replace(REPLY_OLD, REPLY_NEW)
+
+# 9c) cancel_turn forwards to the owner when the turn runs on another replica.
+CANCEL_OLD = (
+    "        if execution is None or execution.task is None or execution.task.done():\n"
+    "            turn = await self.store.get_turn(turn_id)\n"
+    '            if turn is None or turn.get("status") != "running":\n'
+    "                return False\n"
+    '            await self.store.update_turn_status(turn_id, "cancelled", "Turn cancelled")\n'
+    "            return True"
+)
+CANCEL_NEW = (
+    "        if execution is None or execution.task is None or execution.task.done():\n"
+    "            turn = await self.store.get_turn(turn_id)\n"
+    '            if turn is None or turn.get("status") != "running":\n'
+    "                return False\n"
+    "            from deeptutor.services.session import _turn_bus as _bus  # P3b\n"
+    "            if _bus.enabled():\n"
+    '                await _bus.publish_control(turn_id, {"action": "cancel"})\n'
+    '            await self.store.update_turn_status(turn_id, "cancelled", "Turn cancelled")\n'
+    "            return True"
+)
+assert tr.count(CANCEL_OLD) == 1, "turn_runtime cancel_turn anchor not found — upstream changed"
+tr = tr.replace(CANCEL_OLD, CANCEL_NEW)
+
+# 9d) _run_turn: while we OWN the turn, listen for forwarded reply/cancel.
+RUN_SETUP_OLD = (
+    "        reply_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()\n"
+    "        self._reply_queues[turn_id] = reply_queue"
+)
+RUN_SETUP_NEW = (
+    "        reply_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()\n"
+    "        self._reply_queues[turn_id] = reply_queue\n"
+    "\n"
+    "        # P3b: while we own this turn, apply reply/cancel forwarded from other\n"
+    "        # replicas (inert without Redis).\n"
+    "        _ctl_task: asyncio.Task[None] | None = None\n"
+    "        from deeptutor.services.session import _turn_bus as _bus\n"
+    "        if _bus.enabled():\n"
+    "            async def _ctl_listener() -> None:\n"
+    "                try:\n"
+    "                    async for _msg in _bus.subscribe_control(turn_id):\n"
+    '                        _action = _msg.get("action")\n'
+    '                        if _action == "reply":\n'
+    "                            await reply_queue.put(\n"
+    '                                {"text": _msg.get("text") or "", "answers": _msg.get("answers")}\n'
+    "                            )\n"
+    '                        elif _action == "cancel" and execution.task is not None:\n'
+    "                            execution.task.cancel()\n"
+    "                except Exception:\n"
+    "                    pass\n"
+    "            _ctl_task = asyncio.create_task(_ctl_listener())"
+)
+assert tr.count(RUN_SETUP_OLD) == 1, "turn_runtime _run_turn reply_queue setup anchor not found — upstream changed"
+tr = tr.replace(RUN_SETUP_OLD, RUN_SETUP_NEW)
+
+# 9e) _run_turn finally: stop the control listener.
+RUN_FIN_OLD = (
+    "        finally:\n"
+    "            if llm_scope_token is not None and reset_active_llm_selection is not None:\n"
+    "                reset_active_llm_selection(llm_scope_token)"
+)
+RUN_FIN_NEW = (
+    "        finally:\n"
+    "            if _ctl_task is not None:  # P3b: stop the control listener\n"
+    "                _ctl_task.cancel()\n"
+    "                with contextlib.suppress(asyncio.CancelledError):\n"
+    "                    await _ctl_task\n"
+    "            if llm_scope_token is not None and reset_active_llm_selection is not None:\n"
+    "                reset_active_llm_selection(llm_scope_token)"
+)
+assert tr.count(RUN_FIN_OLD) == 1, "turn_runtime _run_turn finally anchor not found — upstream changed"
+tr = tr.replace(RUN_FIN_OLD, RUN_FIN_NEW)
+
+open(tr_f, "w", encoding="utf-8").write(tr)
+
 print(
     f"patched ok: verbose removed, {count} vision construction site(s) updated, "
     "backend launcher -> gunicorn(UvicornWorker, WEB_CONCURRENCY), "
@@ -270,5 +409,6 @@ print(
     "get_session_store -> Postgres when DEEPTUTOR_PG_DSN set, "
     "TutorBot auto-start gated by DEEPTUTOR_ROLE, "
     "chat session persistence -> shared store when DEEPTUTOR_PG_DSN set, "
-    "face-A turn streaming de-affinitized (tail shared log) in multi-replica mode"
+    "face-A turn streaming de-affinitized (tail shared log) in multi-replica mode, "
+    "P3b Redis bus (pub/sub stream + reply/cancel forward) when DEEPTUTOR_REDIS_URL set"
 )

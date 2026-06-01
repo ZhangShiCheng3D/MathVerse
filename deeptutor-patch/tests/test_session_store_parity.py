@@ -281,3 +281,32 @@ async def test_p3_tail_foreign_turn_streams_without_failing(tmp_path, monkeypatc
 
     assert [e["type"] for e in out] == ["stream", "done"]   # streamed the foreign turn
     assert (await store.get_turn(tid))["status"] == "completed"   # NOT failed as orphan
+
+
+# ── P3b: Redis turn bus (needs DEEPTUTOR_REDIS_URL) ───────────────────────────
+
+async def test_p3b_turn_bus_control_roundtrip():
+    """The cross-process control path: a reply/cancel published from a non-owning
+    replica reaches an owner that is listening on the turn's control channel."""
+    import asyncio
+    if not os.environ.get("DEEPTUTOR_REDIS_URL"):
+        pytest.skip("DEEPTUTOR_REDIS_URL not set — P3b bus test needs Redis")
+    try:
+        from deeptutor.services.session import _turn_bus as bus
+    except Exception as exc:  # pragma: no cover
+        pytest.skip(f"redis/_turn_bus not importable here: {exc}")
+
+    assert bus.enabled() is True
+    received = []
+
+    async def owner_listen():
+        async for msg in bus.subscribe_control("turn_p3b_test"):
+            received.append(msg)
+            break
+
+    task = asyncio.create_task(owner_listen())
+    await asyncio.sleep(0.3)                       # let the SUBSCRIBE land
+    n = await bus.publish_control("turn_p3b_test", {"action": "cancel"})
+    await asyncio.wait_for(task, timeout=5)
+    assert n >= 1                                   # an owner received it
+    assert received == [{"action": "cancel"}]

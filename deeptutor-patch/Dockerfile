@@ -23,7 +23,7 @@
 FROM ghcr.io/hkuds/deeptutor:latest
 # gunicorn: P0 process manager. asyncpg: P1 Postgres session store. Neither is in
 # the upstream image.
-RUN pip install --no-cache-dir "gunicorn>=21,<23" "asyncpg>=0.29,<0.31"
+RUN pip install --no-cache-dir "gunicorn>=21,<23" "asyncpg>=0.29,<0.31" "redis>=5,<6"
 COPY patch.py /tmp/patch.py
 COPY overlay/ /tmp/overlay/
 RUN python /tmp/patch.py
