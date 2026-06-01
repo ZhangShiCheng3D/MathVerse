@@ -32,11 +32,14 @@ def generate_daily_tasks(
                     "frequency": chapter.get("frequency", "medium"),
                 })
 
+    # Prioritize: weakest mastery first, then high-frequency exam points,
+    # then harder topics as a tie-breaker.
+    freq_rank = {"high": 0, "medium": 1, "low": 2}
     weak_topics = [t for t in topics if t["mastery"] < 0.6]
     weak_topics.sort(key=lambda t: (
         t["mastery"],
-        -(t["difficulty"] if t["mastery"] < 0.3 else -t["difficulty"]),
-        0 if t["frequency"] == "high" else 1,
+        freq_rank.get(t["frequency"], 1),
+        -t["difficulty"],
     ))
 
     tasks = []

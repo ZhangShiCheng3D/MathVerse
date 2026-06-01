@@ -9,31 +9,12 @@ export default defineAppConfig({
     color: '#8b8fa6',
     selectedColor: '#4F46E5',
     backgroundColor: '#ffffff',
+    // 图标资源缺失，先用纯文字 tabBar（微信允许）；补齐 assets/tab/*.png 后再加回 iconPath。
     list: [
-      {
-        pagePath: 'pages/index/index',
-        text: '首页',
-        iconPath: 'assets/tab/home.png',
-        selectedIconPath: 'assets/tab/home-active.png',
-      },
-      {
-        pagePath: 'pages/solve/index',
-        text: '解题',
-        iconPath: 'assets/tab/solve.png',
-        selectedIconPath: 'assets/tab/solve-active.png',
-      },
-      {
-        pagePath: 'pages/learn/index',
-        text: '学习',
-        iconPath: 'assets/tab/learn.png',
-        selectedIconPath: 'assets/tab/learn-active.png',
-      },
-      {
-        pagePath: 'pages/me/index',
-        text: '我的',
-        iconPath: 'assets/tab/me.png',
-        selectedIconPath: 'assets/tab/me-active.png',
-      },
+      { pagePath: 'pages/index/index', text: '首页' },
+      { pagePath: 'pages/solve/index', text: '解题' },
+      { pagePath: 'pages/learn/index', text: '学习' },
+      { pagePath: 'pages/me/index', text: '我的' },
     ],
   },
   window: {

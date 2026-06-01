@@ -1,59 +1,71 @@
-"""Tests for AgentClient — mocked DeepTutor responses."""
+"""Tests for AgentClient — WS calls mocked at the deeptutor_ws boundary."""
 import pytest
 from unittest.mock import AsyncMock, patch
-import httpx
 from app.services.agent_client import AgentClient, AgentUnavailableError, SolveResult
+from app.services.deeptutor_ws import WSStreamError
 
 
 @pytest.mark.asyncio
-async def test_deep_solve_success():
+async def test_deep_solve_maps_answer():
     client = AgentClient("http://mock:8001")
-    mock_resp = {
-        "status": "success",
-        "answer": "-1/6",
-        "steps": [
-            {"index": 1, "title": "识别", "content": "0/0型", "why": "洛必达条件满足"}
-        ],
-        "knowledge_points": ["gs-1.1"],
-        "related_topics": ["洛必达法则"],
-        "common_mistakes": ["条件未验证"],
-        "tokens_used": 1000,
-    }
-    with patch.object(client, "_post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_resp
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "-1/6", "session_id": "s1", "statuses": []}
+        result = await client.deep_solve("求极限...", "college")
+        assert isinstance(result, SolveResult)
+        assert result.answer == "-1/6"
+        # chat stream is prose -> steps not populated (documented behavior)
+        assert result.steps == []
+        assert mock_chat.call_args.kwargs["mode"] == "solve"
+
+
+@pytest.mark.asyncio
+async def test_deep_solve_parses_structured_json():
+    client = AgentClient("http://mock:8001")
+    prose = (
+        "这是 0/0 型，用洛必达。\n"
+        '```json\n'
+        '{"answer":"-1/6","steps":[{"title":"识别","content":"0/0型","why":"洛必达条件满足"}],'
+        '"knowledge_points":["gs-1.1"],"related_topics":["洛必达"],"common_mistakes":["未验证条件"]}\n'
+        '```'
+    )
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": prose, "session_id": "s", "statuses": []}
         result = await client.deep_solve("求极限...", "college")
         assert result.answer == "-1/6"
         assert len(result.steps) == 1
+        assert result.steps[0]["why"] == "洛必达条件满足"
         assert "gs-1.1" in result.knowledge_points
+
+
+@pytest.mark.asyncio
+async def test_deep_solve_falls_back_to_prose():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "答案就是 -1/6，无结构化输出。", "session_id": "s", "statuses": []}
+        result = await client.deep_solve("求极限...", "college")
+        assert "-1/6" in result.answer
+        assert result.steps == []
 
 
 @pytest.mark.asyncio
 async def test_quick_solve_success():
     client = AgentClient("http://mock:8001")
-    with patch.object(client, "_post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = {"response": "答案是 42"}
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "答案是 42", "session_id": None, "statuses": []}
         result = await client.quick_solve("1+1=?", "college")
         assert result == "答案是 42"
+        assert mock_chat.call_args.kwargs["mode"] == "chat"
 
 
 @pytest.mark.asyncio
 async def test_circuit_breaker_opens():
     client = AgentClient("http://mock:8001")
     client.circuit.failure_threshold = 2
-
-    # Mock httpx.AsyncClient so the real _post runs and triggers circuit breaker
-    mock_client = AsyncMock()
-    mock_client.post.side_effect = httpx.ConnectError("fail")
-    mock_ctx = AsyncMock()
-    mock_ctx.__aenter__.return_value = mock_client
-
-    with patch("httpx.AsyncClient", return_value=mock_ctx):
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.side_effect = WSStreamError("fail")
         for _ in range(2):
-            try:
+            with pytest.raises(AgentUnavailableError):
                 await client.deep_solve("test", "college")
-            except AgentUnavailableError:
-                pass
-
     assert client.circuit.is_open
 
 

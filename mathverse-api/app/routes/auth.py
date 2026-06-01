@@ -1,15 +1,19 @@
 """Authentication routes — WeChat OAuth + JWT."""
 import secrets
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
+from jose import JWTError, jwt
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import SessionLocal
+from app.database import get_db
 from app.models.all import User
+from app.services.analytics import log_event
 from app.middleware.auth_middleware import (
     create_access_token,
     create_refresh_token,
@@ -18,7 +22,28 @@ from app.middleware.auth_middleware import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-_state_store: dict[str, str] = {}
+
+
+def _create_oauth_state() -> str:
+    """Stateless CSRF state — signed, short-lived, survives multi-worker/restart."""
+    return jwt.encode(
+        {
+            "nonce": secrets.token_urlsafe(8),
+            "type": "oauth_state",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=10),
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def _verify_oauth_state(state: str) -> None:
+    try:
+        payload = jwt.decode(state, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        raise HTTPException(400, "Invalid or expired state parameter")
+    if payload.get("type") != "oauth_state":
+        raise HTTPException(400, "Invalid state parameter")
 
 
 class TokenResponse(BaseModel):
@@ -27,15 +52,18 @@ class TokenResponse(BaseModel):
     user: dict
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 @router.get("/wechat/login")
 async def wechat_login(request: Request):
     """Initiate WeChat OAuth flow. Redirects to WeChat authorization page."""
     if not settings.wechat_app_id:
         raise HTTPException(500, "WECHAT_APP_ID not configured")
 
-    state = secrets.token_urlsafe(32)
+    state = _create_oauth_state()
     redirect_uri = str(request.url_for("wechat_callback"))
-    _state_store[state] = redirect_uri
 
     params = urlencode({
         "appid": settings.wechat_app_id,
@@ -50,11 +78,9 @@ async def wechat_login(request: Request):
 
 
 @router.get("/wechat/callback")
-async def wechat_callback(request: Request, code: str, state: str):
+async def wechat_callback(request: Request, code: str, state: str, db: Session = Depends(get_db)):
     """Handle WeChat OAuth callback. Exchanges code for access token and user info."""
-    expected = _state_store.pop(state, None)
-    if not expected:
-        raise HTTPException(400, "Invalid state parameter")
+    _verify_oauth_state(state)
 
     async with httpx.AsyncClient() as client:
         token_resp = await client.get(
@@ -79,43 +105,40 @@ async def wechat_callback(request: Request, code: str, state: str):
         )
         user_info = user_resp.json()
 
-    db = SessionLocal()
-    try:
-        union_id = user_info.get("unionid", openid)
-        user = db.query(User).filter(User.wechat_union_id == union_id).first()
-        if not user:
-            user = User(
-                wechat_union_id=union_id,
-                wechat_open_id=openid,
-                nickname=user_info.get("nickname", "数学探索者"),
-                avatar_url=user_info.get("headimgurl", ""),
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
+    union_id = user_info.get("unionid", openid)
+    user = db.query(User).filter(User.wechat_union_id == union_id).first()
+    if not user:
+        user = User(
+            wechat_union_id=union_id,
+            wechat_open_id=openid,
+            nickname=user_info.get("nickname", "数学探索者"),
+            avatar_url=user_info.get("headimgurl", ""),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
-        access_token_jwt = create_access_token(user.id)
-        refresh_token_jwt = create_refresh_token(user.id)
+    log_event(db, "login", user.id, {"channel": "wechat"})
+    access_token_jwt = create_access_token(user.id)
+    refresh_token_jwt = create_refresh_token(user.id)
 
-        return {
-            "access_token": access_token_jwt,
-            "refresh_token": refresh_token_jwt,
-            "user": {
-                "id": user.id,
-                "nickname": user.nickname,
-                "avatar_url": user.avatar_url,
-                "current_stage": user.current_stage,
-                "tier": user.tier,
-            },
-        }
-    finally:
-        db.close()
+    return {
+        "access_token": access_token_jwt,
+        "refresh_token": refresh_token_jwt,
+        "user": {
+            "id": user.id,
+            "nickname": user.nickname,
+            "avatar_url": user.avatar_url,
+            "current_stage": user.current_stage,
+            "tier": user.tier,
+        },
+    }
 
 
 @router.post("/refresh")
-async def refresh_token(refresh_token: str):
+async def refresh_token(req: RefreshRequest):
     """Refresh access token using refresh token."""
-    payload = decode_token(refresh_token)
+    payload = decode_token(req.refresh_token)
     if payload.get("type") != "refresh":
         raise HTTPException(401, "Invalid refresh token")
     user_id = payload["sub"]

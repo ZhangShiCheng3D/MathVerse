@@ -1,6 +1,7 @@
 import Taro from '@tarojs/taro';
 
-const BASE_URL = 'https://api.shuxuejie.com';
+// Override per-environment via TARO_APP_API_URL (Taro injects TARO_APP_* at build).
+const BASE_URL = process.env.TARO_APP_API_URL || 'https://kuangyebar.cn';
 
 let accessToken: string | null = null;
 let refreshToken: string | null = null;

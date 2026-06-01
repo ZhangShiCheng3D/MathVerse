@@ -1,10 +1,46 @@
-"""HTTP client for DeepTutor backend, with timeout, retry, and circuit breaker."""
+"""Client for the DeepTutor backend.
+
+Heavy solve/chat calls go over DeepTutor's real WebSocket API (see deeptutor_ws);
+the circuit breaker wraps those. Legacy REST helpers (_post) remain only for the
+not-yet-migrated quiz/lecture paths — see the TODO on those methods.
+"""
 import asyncio
+import json
+import logging
+import re
 import time
 import os
 from dataclasses import dataclass
 import httpx
+import websockets
 from app.config import settings
+from app.services import deeptutor_ws
+
+logger = logging.getLogger(__name__)
+
+# Ask the engine to append a structured JSON block so we can rebuild the
+# three-layer (answer / steps / summary) display from a prose chat stream.
+_SOLVE_SCHEMA_HINT = (
+    "解答完成后，请在最后附一个 JSON 代码块（```json ... ```），严格使用如下结构：\n"
+    '{"answer":"最终答案","steps":[{"title":"步骤标题","content":"步骤说明","why":"为什么这样做"}],'
+    '"knowledge_points":["知识点"],"related_topics":["相关题型"],"common_mistakes":["常见错误"]}'
+)
+
+
+def _extract_json(text: str) -> dict | None:
+    """Pull the structured JSON block out of a prose answer; None if absent/invalid."""
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+    candidate = fenced.group(1) if fenced else None
+    if candidate is None:
+        loose = re.search(r"\{.*\}", text, re.S)
+        candidate = loose.group(0) if loose else None
+    if candidate is None:
+        return None
+    try:
+        data = json.loads(candidate)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
 
 
 @dataclass
@@ -58,6 +94,20 @@ class AgentClient:
         self.base_url = base_url or settings.deeptutor_url
         self.circuit = CircuitBreaker()
 
+    async def _guarded(self, awaitable):
+        """Run a DeepTutor call under the circuit breaker, mapping failures to 503."""
+        if not self.circuit.can_try():
+            awaitable.close()
+            raise AgentUnavailableError("DeepTutor circuit breaker open")
+        try:
+            result = await awaitable
+            self.circuit.record_success()
+            return result
+        except (deeptutor_ws.WSStreamError, OSError, asyncio.TimeoutError,
+                websockets.WebSocketException) as e:
+            self.circuit.record_failure()
+            raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
+
     async def _post(self, path: str, json: dict, timeout: float = 60.0) -> dict:
         if not self.circuit.can_try():
             raise AgentUnavailableError("DeepTutor circuit breaker open")
@@ -80,38 +130,43 @@ class AgentClient:
         raise AgentUnavailableError("DeepTutor max retries exceeded")
 
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
-        """Call DeepTutor Deep Solve (6-Agent pipeline)."""
-        data = await self._post("/api/agent/deep-solve", {
-            "question": question,
-            "mode": "solve",
-            "context": {
-                "stage": stage,
-                "knowledge_point_id": kp_id,
-                "style": "socratic",
-                "language": "zh-CN",
-            },
-            "options": {
-                "max_steps": 15,
-                "enable_web_search": False,
-            },
-        }, timeout=90.0)
+        """Deep solve via DeepTutor chat WS (solve mode).
+
+        Prompts the engine to append a structured JSON block, then parses it into the
+        three-layer SolveResult. If the engine returns only prose, we degrade gracefully
+        to answer-only (steps empty).
+        """
+        message = (
+            f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
+            f"{_SOLVE_SCHEMA_HINT}\n\n题目：\n{question}"
+        )
+        data = await self._guarded(deeptutor_ws.chat(message, mode="solve", timeout=90.0))
+        raw = data["answer"]
+        parsed = _extract_json(raw)
+        if parsed:
+            return SolveResult(
+                status="success",
+                answer=parsed.get("answer") or raw,
+                steps=parsed.get("steps", []),
+                knowledge_points=parsed.get("knowledge_points", []),
+                related_topics=parsed.get("related_topics", []),
+                common_mistakes=parsed.get("common_mistakes", []),
+                tokens_used=0,
+            )
         return SolveResult(
-            status=data.get("status", "unknown"),
-            answer=data.get("answer", ""),
-            steps=data.get("steps", []),
-            knowledge_points=data.get("knowledge_points", []),
-            related_topics=data.get("related_topics", []),
-            common_mistakes=data.get("common_mistakes", []),
-            tokens_used=data.get("tokens_used", 0),
+            status="success", answer=raw, steps=[], knowledge_points=[],
+            related_topics=[], common_mistakes=[], tokens_used=0,
         )
 
     async def quick_solve(self, question: str, stage: str) -> str:
-        """Quick solve without full 6-Agent pipeline."""
-        data = await self._post("/api/chat", {
-            "message": f"请解答以下数学题，给出答案和简要步骤：\n{question}",
-            "context": {"stage": stage},
-        }, timeout=30.0)
-        return data.get("response", "")
+        """Quick answer via DeepTutor chat WS (chat mode)."""
+        message = f"请简要解答这道数学题（学段：{stage}），给出答案和要点：\n{question}"
+        data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
+        return data["answer"]
+
+    # TODO(integration): chat_with_template / generate_quiz still target legacy REST paths.
+    # Migrate to DeepTutor WS — lecture via chat WS (mode=chat), quiz via /api/v1/question/generate.
+    # Pending confirmation of the question/* event schema; see design optimization doc.
 
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
         """Call Chat endpoint with a custom prompt template."""
@@ -121,6 +176,7 @@ class AgentClient:
             with open(template_full_path, encoding="utf-8") as f:
                 template = f.read()
         else:
+            logger.warning("Prompt template missing: %s — sending empty system prompt", template_full_path)
             template = ""
 
         data = await self._post("/api/chat", {
