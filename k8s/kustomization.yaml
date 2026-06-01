@@ -1,0 +1,45 @@
+# Kustomize base for the MathVerse + DeepTutor high-concurrency stack.
+#
+# Fill the placeholders below (REPLACE_ME_*) and the per-resource ones, then:
+#   kubectl apply -k k8s/
+#
+# This base assumes the P0/P1/P2/P3a changes are built into the images:
+#   - DeepTutor image built from deeptutor-patch/ (gunicorn launcher, Postgres
+#     session store, DEEPTUTOR_ROLE gating, face-A de-affinity).
+#   - mathverse-api image built from mathverse-api/.
+# Because P3a de-affinitized face A, the ingress needs NO session affinity.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mathverse
+
+resources:
+  - namespace.yaml
+  - data.yaml
+  - gateway.yaml
+  - deeptutor.yaml
+  - mathverse-api.yaml
+  - edge.yaml
+  # secret.example.yaml is NOT listed — copy it to a real secret.yaml (kept out of
+  # git) and either add it here or apply it separately.
+
+# DRY: the LiteLLM gateway config and DeepTutor's model_catalog.json are generated
+# as ConfigMaps from their source files (single source of truth).
+configMapGenerator:
+  - name: litellm-config
+    files:
+      - litellm-config.yaml=../gateway/litellm-config.yaml
+  - name: deeptutor-model-catalog
+    files:
+      - files/model_catalog.json
+
+# Pin images to your registry + tag. Build:
+#   docker build -t REPLACE_ME_REGISTRY/deeptutor-patched:TAG deeptutor-patch/
+#   docker build -t REPLACE_ME_REGISTRY/mathverse-api:TAG  mathverse-api/
+images:
+  - name: deeptutor-patched
+    newName: REPLACE_ME_REGISTRY/deeptutor-patched
+    newTag: REPLACE_ME_TAG
+  - name: mathverse-api
+    newName: REPLACE_ME_REGISTRY/mathverse-api
+    newTag: REPLACE_ME_TAG

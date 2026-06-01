@@ -1,0 +1,65 @@
+# MathVerse BFF — the public edge app. Talks to DeepTutor over the in-cluster
+# Service (http://deeptutor:8001 -> ws://deeptutor:8001). Admission backpressure
+# (P-MV) bounds in-flight DeepTutor calls per replica.
+#
+# NOTE: DATABASE_URL here is mathverse-api's OWN business DB (users/quota/mistakes),
+# distinct from DeepTutor's DEEPTUTOR_PG_DSN. The default SQLite is per-pod and does
+# NOT scale across replicas — point it at a managed Postgres for multi-replica.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mathverse-api
+spec:
+  selector:
+    app: mathverse-api
+  ports:
+    - port: 8002
+      targetPort: 8002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mathverse-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mathverse-api
+  template:
+    metadata:
+      labels:
+        app: mathverse-api
+    spec:
+      containers:
+        - name: mathverse-api
+          image: mathverse-api            # pinned by kustomization images:
+          ports:
+            - containerPort: 8002
+          env:
+            - name: DEEPTUTOR_URL
+              value: "http://deeptutor:8001"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: DATABASE_URL
+              value: "REPLACE_ME_MATHVERSE_DB_URL"   # managed Postgres for multi-replica
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: app-secrets, key: JWT_SECRET } }
+            - name: DEEPSEEK_API_KEY
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DEEPSEEK_API_KEY } }
+            - name: DASHSCOPE_API_KEY
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DASHSCOPE_API_KEY } }
+            - name: WECHAT_APP_ID
+              valueFrom: { secretKeyRef: { name: app-secrets, key: WECHAT_APP_ID } }
+            - name: WECHAT_APP_SECRET
+              valueFrom: { secretKeyRef: { name: app-secrets, key: WECHAT_APP_SECRET } }
+            # P-MV tuning: cap concurrent in-flight DeepTutor calls per replica.
+            - name: DEEPTUTOR_MAX_CONCURRENCY
+              value: "64"
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8002 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }

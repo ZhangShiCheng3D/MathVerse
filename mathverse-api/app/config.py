@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 15
     jwt_refresh_days: int = 7
     deeptutor_url: str = "http://deeptutor:8001"
+    # Admission control toward DeepTutor: cap concurrent in-flight calls so a
+    # surge sheds onto the DeepSeek degrade path instead of overloading the engine.
+    deeptutor_max_concurrency: int = 64
+    deeptutor_admission_timeout: float = 8.0
     deepseek_api_key: str = ""
     qwen_api_key: str = ""
     # DashScope (Alibaba) — multimodal vision for photo-solving (qwen-vl).

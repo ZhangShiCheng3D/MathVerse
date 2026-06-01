@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepTutor 高并发系统性优化方案（万级并发）· 2026-06-02</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2029; --panel2:#222b36; --ink:#e6edf3; --muted:#9aa7b4;
+    --accent:#4ea1ff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --line:#2d3742;
+    --code:#0b0f14;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
+  h1{font-size:30px;margin:0 0 8px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:15px}
+  h2{font-size:22px;margin:48px 0 14px;padding-top:10px;border-top:1px solid var(--line)}
+  h3{font-size:17px;margin:26px 0 10px;color:#cdd9e5}
+  h4{font-size:15px;margin:18px 0 8px;color:var(--accent)}
+  p{margin:10px 0}
+  code,kbd{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px/1.5 "JetBrains Mono",Consolas,monospace;color:#9ad1ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font:12.5px/1.55 "JetBrains Mono",Consolas,monospace;color:#c9d6e3}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#cdd9e5;font-weight:600}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:4px;padding:1px 7px;vertical-align:middle}
+  .t-bad{background:rgba(248,81,73,.16);color:#ff8b82;border:1px solid rgba(248,81,73,.4)}
+  .t-warn{background:rgba(210,153,34,.16);color:#e3b341;border:1px solid rgba(210,153,34,.4)}
+  .t-good{background:rgba(63,185,80,.16);color:#56d364;border:1px solid rgba(63,185,80,.4)}
+  .t-info{background:rgba(78,161,255,.14);color:#79c0ff;border:1px solid rgba(78,161,255,.4)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:16px 0}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.bad{border-left-color:var(--bad)}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.good{border-left-color:var(--good)}
+  .ev{color:var(--muted);font-size:12px;font-family:"JetBrains Mono",Consolas,monospace}
+  ul,ol{margin:10px 0 10px 4px;padding-left:22px}
+  li{margin:5px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card .n{font-size:26px;font-weight:800;color:var(--accent)}
+  .card .l{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .muted{color:var(--muted)}
+  .toc{columns:2;column-gap:32px;font-size:14px}
+  .toc a{color:#9ad1ff;text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  .phase{border:1px solid var(--line);border-radius:10px;margin:14px 0;overflow:hidden}
+  .phase .head{background:var(--panel2);padding:12px 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+  .phase .body{padding:12px 18px}
+  .ascii{white-space:pre;font:12px/1.35 "JetBrains Mono",Consolas,monospace;color:#9fb4c8;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:16px;overflow:auto}
+  .kpi{font-weight:700;color:var(--good)}
+  hr{border:0;border-top:1px solid var(--line);margin:30px 0}
+  .small{font-size:12.5px}
+  a.anchor{color:inherit;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>DeepTutor 高并发系统性优化方案</h1>
+  <div class="sub">目标：从「单机单进程、面向单用户/小团队」演进到 <b>万级（10k+）并发</b> · 可横向扩展 · 2026-06-02</div>
+  <div class="sub" style="margin-top:10px">
+    依据：直接读取 <code>HKUDS/DeepTutor</code> <code>main</code> 分支真实源码（非假设）。所有结论附 <span class="ev">file:line</span> 证据。
+  </div>
+</header>
+
+<div class="panel">
+  <b>一句话结论。</b> DeepTutor 当前是一个 <b>单进程、单 worker、带大量进程内单例与本地磁盘状态</b> 的 FastAPI 应用，它的并发模型是「为本地/单用户而生」。要达到万级并发，<b>瓶颈不在 CPU/GPU，而在三处</b>：(1) <b>进程内状态</b>（turn 执行注册表、JSON 文件会话、内存事件总线）阻止安全地多进程/多副本；(2) <b>本地磁盘状态</b>（SQLite 会话库、JSON 会话文件、本地输出目录）阻止无状态副本共享；(3) <b>外部 LLM 吞吐天花板</b>（DeepSeek/DashScope 账户级限流）才是真正的物理上限。优化主线 = <b>无状态化 App 层 → 外置状态到共享数据层 → 在 LLM 网关做分布式限流/多 key 负载均衡 → 边缘做 WS 亲和路由 + 多副本自动扩缩</b>。
+</div>
+
+<h2 id="toc">目录</h2>
+<div class="toc">
+  <a href="#method">0. 核查方法与范围</a><br>
+  <a href="#surfaces">1. 两个并发面（关键区分）</a><br>
+  <a href="#bottlenecks">2. 瓶颈清单（带源码证据）</a><br>
+  <a href="#constraint">3. 头号约束：turn 执行是进程本地的</a><br>
+  <a href="#target">4. 目标架构（分层）</a><br>
+  <a href="#capacity">5. 容量模型：10k 并发要多少机器</a><br>
+  <a href="#changes">6. 逐文件改造点（fork/patch 蓝本）</a><br>
+  <a href="#mathverse">7. MathVerse 集成层改造</a><br>
+  <a href="#roadmap">8. 分阶段落地路线图</a><br>
+  <a href="#risks">9. 风险登记册</a><br>
+  <a href="#decisions">10. 需要你拍板的决策</a><br>
+</div>
+
+<h2 id="method">0. 核查方法与范围</h2>
+<p>本方案不基于对 DeepTutor 的假设，而是逐文件读取其真实源码后撰写。仓库结构：<code>deeptutor/</code> 包共 599 个 Python 文件，核心并发相关子系统为 <code>api/</code>（FastAPI 入口 + 25 个 router）、<code>services/session/</code>（会话/turn 存储）、<code>services/llm/</code>（35 文件，LLM 客户端 + 限流）、<code>services/rag/</code>（LlamaIndex + qdrant）、<code>core/</code> + <code>events/</code>（流与事件总线）、<code>runtime/</code>（启动编排）。已精读的关键文件均在下文以 <span class="ev">文件名:行号</span> 标注。</p>
+<p class="small muted">注：DeepTutor 在本项目中以上游镜像 <code>ghcr.io/hkuds/deeptutor</code> 形式使用，仅通过 <code>deeptutor-patch/patch.py</code> 构建期覆盖少量文件。本方案默认沿用「fork + 构建期覆盖」交付，既能改内部、又能跟随上游（见 §6）。</p>
+
+<h2 id="surfaces">1. 两个并发面（关键区分）</h2>
+<p>DeepTutor 对外暴露 <b>两套语义不同的 WebSocket 流</b>，并发约束完全不同。把它们混为一谈会导致优化方向错误。</p>
+<table>
+  <tr><th>维度</th><th>面 A：统一 WS <code>/api/v1/ws</code></th><th>面 B：直连流 <code>/api/v1/chat</code> 等</th></tr>
+  <tr>
+    <td>谁在用</td>
+    <td>DeepTutor 自带 Next.js 前端</td>
+    <td><b>MathVerse 本项目</b>（<code>deeptutor_ws.py</code> 连的就是它，含 <code>/vision/solve</code>、<code>/question/judge</code>）</td>
+  </tr>
+  <tr>
+    <td>执行模型</td>
+    <td>turn-runtime：后台 task 跑 turn，事件持久化到 store，支持订阅/重连/取消 <span class="ev">unified_ws.py:71-110</span></td>
+    <td>在同一条 WS 连接内、同一进程里直接把 ChatAgent 的流转发出去 <span class="ev">chat.py:191-221</span></td>
+  </tr>
+  <tr>
+    <td>会话存储</td>
+    <td><code>SessionStoreProtocol</code> → 默认 SQLite 本地库 / 可选 PocketBase <span class="ev">protocol.py:14</span></td>
+    <td>遗留 JSON 文件 <code>SessionManager</code>（整文件读-改-写，<b>无锁</b>）<span class="ev">base_session_manager.py:97-109</span></td>
+  </tr>
+  <tr>
+    <td>跨进程订阅</td>
+    <td><span class="tag t-bad">致命</span> 非属主进程订阅会把 turn 判为孤儿并 <b>标记 failed</b> <span class="ev">turn_runtime.py:933-945</span></td>
+    <td><span class="tag t-good">无此问题</span> 整个 turn 在一条连接内完成，不跨进程</td>
+  </tr>
+  <tr>
+    <td>横向扩展难点</td>
+    <td>必须 <b>会话亲和</b> 或 <b>共享事件总线</b></td>
+    <td>只需 <b>外置 JSON 文件状态</b> + 多 worker/多副本</td>
+  </tr>
+</table>
+<div class="callout good">
+  <b>对本项目的含义：</b>MathVerse 走的「面 B」<b>反而更容易扩</b>——没有跨进程亲和约束。优先把面 B 打到万级（无状态会话 + 多副本 + LLM 网关），面 A（带重连的高级 UX）作为后续。下文路线图据此排序。
+</div>
+
+<h2 id="bottlenecks">2. 瓶颈清单（带源码证据）</h2>
+<table>
+  <tr><th>#</th><th>瓶颈</th><th>证据</th><th>并发影响</th><th>严重度</th></tr>
+  <tr>
+    <td>B1</td>
+    <td><b>生产只跑单 uvicorn 进程，无 <code>--workers</code></b></td>
+    <td><span class="ev">Dockerfile:224</span> <code>exec python -m uvicorn ...main:app --host 0.0.0.0 --port $PORT</code>（dev 还加 <code>--reload</code>）</td>
+    <td>整机只用 1 个核的事件循环；GIL 下 token 处理、JSON、加解密串行</td>
+    <td><span class="tag t-bad">P0</span></td>
+  </tr>
+  <tr>
+    <td>B2</td>
+    <td><b>turn 执行进程本地</b>：<code>_executions</code> 内存字典 + 活订阅队列</td>
+    <td><span class="ev">turn_runtime.py:549, 879-945, 1842</span></td>
+    <td>同一 session 的所有消息必须命中同一进程，否则 turn 被判孤儿 failed → 多 worker/多副本不安全</td>
+    <td><span class="tag t-bad">P0（面A）</span></td>
+  </tr>
+  <tr>
+    <td>B3</td>
+    <td><b>JSON 文件会话：整文件读-改-写、无锁、每用户单文件、上限 100</b></td>
+    <td><span class="ev">base_session_manager.py:89-109, 41</span>（每条消息两次全量重写）<span class="ev">chat.py:138,223</span></td>
+    <td>并发写同一文件 → 读-改-写竞态 → 丢更新/JSON 损坏；磁盘 IO 成为隐性全局锁（且没有真正的锁）</td>
+    <td><span class="tag t-bad">P0（面B）</span></td>
+  </tr>
+  <tr>
+    <td>B4</td>
+    <td><b>默认会话/turn store 是本地 SQLite 单文件</b></td>
+    <td><span class="ev">session/sqlite_store.py</span>（默认实现，本地磁盘）</td>
+    <td>本地磁盘状态 → 副本之间不共享；SQLite 单写者，高并发写争用</td>
+    <td><span class="tag t-bad">P0</span></td>
+  </tr>
+  <tr>
+    <td>B5</td>
+    <td><b>LLM 限流是进程内、按 provider 的信号量+令牌桶</b>（默认并发 20 / 600 RPM）</td>
+    <td><span class="ev">traffic_control.py:21-49</span></td>
+    <td>N 副本各自限流 → 聚合 = N×20 并发、N×600 RPM 打到 DeepSeek 账户级限额 → 要么超限被封、要么无全局背压</td>
+    <td><span class="tag t-warn">P1</span></td>
+  </tr>
+  <tr>
+    <td>B6</td>
+    <td><b>进程内事件总线单例</b>（asyncio.Queue）</td>
+    <td><span class="ev">event_bus.py:61-90, 197-206</span></td>
+    <td>仅进程内可见；多副本下内部钩子（解题完成→记忆更新）各自为政，无法跨副本协调</td>
+    <td><span class="tag t-warn">P2</span></td>
+  </tr>
+  <tr>
+    <td>B7</td>
+    <td><b>TutorBot 在 lifespan 里每副本自动全部启动</b></td>
+    <td><span class="ev">main.py:147-151</span> <code>auto_start_bots()</code></td>
+    <td>N 副本 → 同一批常驻 bot 被启动 N 次（重复推送/重复定时任务）</td>
+    <td><span class="tag t-warn">P2</span></td>
+  </tr>
+  <tr>
+    <td>B8</td>
+    <td><b>用户输出走本地磁盘静态挂载</b> <code>/api/outputs</code></td>
+    <td><span class="ev">main.py:258-262</span>（动画/可视化产物落本地 FS）</td>
+    <td>副本 A 生成的文件，副本 B 取不到 → 多副本下 404</td>
+    <td><span class="tag t-warn">P2</span></td>
+  </tr>
+  <tr>
+    <td>B9</td>
+    <td><b>大量进程内单例</b>：llm-client / session-manager / turn-runtime / rag-pipeline-cache</td>
+    <td><span class="ev">client.py:190-206; rag/factory.py:15-48; turn_runtime.py:1842</span></td>
+    <td>本身可接受（无状态缓存），但隐含「状态在进程里」的假设，必须逐一确认无共享可变状态</td>
+    <td><span class="tag t-info">审查项</span></td>
+  </tr>
+  <tr>
+    <td>B10</td>
+    <td><b>qdrant / RAG 管线进程内缓存</b>，向量库是否集群化未定</td>
+    <td><span class="ev">rag/factory.py:15</span> <code>_PIPELINE_CACHE</code>；compose 中 qdrant 为单实例</td>
+    <td>读多写少，单 qdrant 在万级检索 QPS 下需分片/副本</td>
+    <td><span class="tag t-warn">P2</span></td>
+  </tr>
+</table>
+<div class="callout">
+  <b>好消息（可复用的良好设计）：</b>
+  <ul>
+    <li><span class="tag t-good">✓</span> 会话存储已抽象为 <code>SessionStoreProtocol</code>（全异步、清晰），且已有 SQLite / PocketBase 两套实现 —— <b>新增一个 <code>PostgresSessionStore</code> 即可外置状态，无需改业务层</b> <span class="ev">protocol.py:14-83</span>。</li>
+    <li><span class="tag t-good">✓</span> turn 事件是 <b>带 seq 持久化的事件日志</b>，已内建孤儿恢复（属主进程死后 turn 自动 failed），说明上游已部分考虑多进程 <span class="ev">turn_runtime.py:573-592</span>。</li>
+    <li><span class="tag t-good">✓</span> <code>TrafficController</code> 信号量+令牌桶设计正确，只需把「进程内」升级为「分布式（Redis）」 <span class="ev">traffic_control.py</span>。</li>
+    <li><span class="tag t-good">✓</span> 全链路 <code>async</code>，IO 密集，天然适合协程高并发 —— 单进程瓶颈靠多 worker/多副本即可解。</li>
+  </ul>
+</div>
+
+<h2 id="constraint">3. 头号架构约束：turn 执行是进程本地的</h2>
+<p>这是整份方案最重要的一条，决定横向扩展策略。<code>subscribe_turn</code> 的逻辑（<span class="ev">turn_runtime.py:879-945</span>）：</p>
+<ol>
+  <li>先从 <b>共享 store</b> 回放历史事件（<code>get_turn_events(after_seq)</code>）—— 这部分跨进程可用。</li>
+  <li>若本进程的 <code>_executions</code> 里有该 turn 的执行体，挂一个内存订阅队列做实时推流。</li>
+  <li><b>若本进程没有该执行体</b>（turn 跑在另一进程/副本），且 store 里 turn 仍是 <code>running</code> → <code>_fail_orphan_running_turn</code> 直接把它 <b>标记 failed</b> <span class="ev">turn_runtime.py:933-945, 573-587</span>。</li>
+</ol>
+<div class="callout bad">
+  <b>后果：</b>在「面 A」(<code>/api/v1/ws</code>) 上，任何「在非属主进程上订阅一个运行中 turn」的行为会 <b>误杀该 turn</b>。这意味着 —— 哪怕只是同一容器内开 2 个 uvicorn worker —— 一旦某条 WS 落到另一个 worker，就会破坏正在跑的 turn。</div>
+<p>因此面 A 的横向扩展有两条路：</p>
+<table>
+  <tr><th></th><th>路线 A1：会话亲和（最小改动）</th><th>路线 A2：共享事件总线（彻底）</th></tr>
+  <tr><td>做法</td>
+    <td>每容器 <b>单 worker</b>；LB 按 <code>session_id</code> 一致性哈希把同一会话的所有 WS 路由到同一副本；靠加副本扩容</td>
+    <td>turn 执行体把事件发到 <b>Redis pub/sub</b>（keyed by turn_id）；任意副本的 <code>subscribe_turn</code> = store 回放 + Redis 订阅；属主用租约/心跳判活而非「是否在我进程」</td>
+  </tr>
+  <tr><td>改动量</td><td><span class="tag t-good">小</span>（不改 DeepTutor 代码，靠边缘路由）</td><td><span class="tag t-warn">中-大</span>（改 turn_runtime 推流与订阅）</td></tr>
+  <tr><td>多核利用</td><td>每容器 1 核有效 → 靠 k8s 一节点多容器补</td><td>可多 worker，充分利用多核</td></tr>
+  <tr><td>故障转移</td><td>副本挂 → 该会话进行中的 turn 丢失，需重发</td><td>turn 可由其他副本接管订阅，体验更平滑</td></tr>
+  <tr><td>建议</td><td><b>先做 A1</b> 把面 A 拉到可用</td><td>万级稳定期再上 A2</td></tr>
+</table>
+<p class="small muted">面 B（MathVerse 实际路径）<b>不受此约束</b>：整个 turn 在一条连接内一个进程跑完，不存在跨进程订阅。所以面 B 可以直接多 worker + 多副本，唯一要解的是 B1（开 workers）+ B3（外置 JSON 会话）。</p>
+
+<h2 id="target">4. 目标架构（分层）</h2>
+<div class="ascii">
+                          ┌─────────────────────────────────────────────┐
+   微信小程序 / H5         │                 边缘 / 接入层                  │
+        │                │  WS-aware Ingress (nginx/envoy/k8s ingress)   │
+        ▼                │  · TLS 终止   · 连接数/速率限制(admission)     │
+  ┌───────────┐          │  · 面A: 按 session_id 一致性哈希(会话亲和)     │
+  │ MathVerse │──────────▶  · 面B: 无亲和，轮询/最少连接                  │
+  │  BFF/API  │   WSS    │  · HPA: 按「在飞 turn 数 / 连接数」自动扩缩     │
+  │ (多副本)   │          └───────────────────┬─────────────────────────┘
+  └───────────┘                              │
+       │ 连接池 + 队列 + 背压                  ▼
+       │                    ┌──────────────────────────────────────┐
+       │                    │        DeepTutor App 层 (无状态副本)    │
+       │                    │  gunicorn + N uvicorn worker / 容器     │
+       │                    │  · 面B 直连流  · 面A turn-runtime        │
+       │                    │  · 启动期: 不再 auto_start_bots(每副本)  │
+       │                    └───┬───────────┬──────────┬────────────┘
+       │                        │           │          │
+       ▼                        ▼           ▼          ▼
+  ┌─────────────┐    ┌────────────────┐ ┌──────────┐ ┌──────────────────┐
+  │ LLM 网关     │    │  状态数据层      │ │  Redis   │ │  对象存储(COS/S3) │
+  │ (LiteLLM /  │    │  PostgreSQL     │ │ ·分布式  │ │  动画/可视化产物   │
+  │  自研代理)   │    │  ·会话/turn/    │ │  限流    │ │  替代本地 /outputs│
+  │ ·多key/多账户│    │   消息/事件日志  │ │ ·pub/sub │ └──────────────────┘
+  │  负载均衡    │    │  (PostgresStore  │ │ ·缓存    │
+  │ ·全局限流/重试│   │   实现Protocol)  │ │ ·队列    │ ┌──────────────────┐
+  │ ·熔断/排队   │    └────────────────┘ └──────────┘ │  qdrant 集群       │
+  └──────┬──────┘                                     │  (分片+副本) RAG   │
+         ▼                                            └──────────────────┘
+   DeepSeek / DashScope / (可选)自托管 vLLM 推理集群
+</div>
+<h3>四个数据层组件（新增）</h3>
+<div class="grid">
+  <div class="card"><div class="n">PG</div><div class="l">PostgreSQL：会话/turn/消息/事件日志的共享存储，实现 <code>SessionStoreProtocol</code></div></div>
+  <div class="card"><div class="n">Redis</div><div class="l">分布式限流令牌桶 + turn 事件 pub/sub + 缓存 + 入场队列</div></div>
+  <div class="card"><div class="n">qdrant×N</div><div class="l">向量库集群：分片+副本，承载万级 RAG 检索 QPS</div></div>
+  <div class="card"><div class="n">COS/S3</div><div class="l">对象存储：动画/可视化/附件产物，替代本地磁盘静态挂载</div></div>
+</div>
+
+<h2 id="capacity">5. 容量模型：10k 并发到底要多少机器</h2>
+<p>「并发」必须定义清楚。对 LLM 服务，真正的并发单位是 <b>「在飞 turn」（正在流式产出的解题会话）</b>，而非「TCP 连接」。一条 turn 的生命周期 80% 时间在 <b>等 LLM 吐 token</b>（IO 等待），CPU 占用低。</p>
+<table>
+  <tr><th>量级</th><th>含义</th><th>主导约束</th></tr>
+  <tr><td>10k 在线连接</td><td>1 万个小程序同时挂着 WS，但大多 idle</td><td>仅靠 FD/内存，单层多 worker 即可扛（每连接 ~几十KB）</td></tr>
+  <tr><td>10k 在飞 turn</td><td>1 万个解题 <b>同时</b>在流式产出</td><td><span class="tag t-bad">外部 LLM 吞吐</span> 才是天花板，不是 DeepTutor 本身</td></tr>
+</table>
+<h3>估算（以 10k 在飞 turn 为目标）</h3>
+<ul>
+  <li><b>App 层</b>：异步 IO 下，单 worker 可同时持有数百条流式 turn（受事件循环调度 + 每 turn token 处理 CPU 限制，保守按 ~250/worker）。10000 / 250 ≈ <b>40 个 worker 进程</b>。每节点 8 核跑 6-8 worker → <span class="kpi">约 6 台 8 核机器</span>（加冗余 8-10 台）。这部分很便宜。</li>
+  <li><b>状态层</b>：PostgreSQL 单主 + 读副本，事件日志写入是主要负载（每 turn 数十条 event）。万级在飞 ≈ 数万 event/s 写入 —— 需要 <b>批量写 + 连接池 + 可能分区表</b>；单台高配 PG 可达数万 TPS，配 PgBouncer。</li>
+  <li><b>推理层（真正的瓶颈与成本）</b>：10k 在飞 turn 同时向 DeepSeek 流式 = 10k 并发上游请求 + 巨量 token 吞吐。DeepSeek 账户级并发/RPM/TPM 限额远低于此。<b>必须</b>：(a) 多账户/多 key 负载均衡；(b) 全局分布式限流 + 排队；(c) 超出即背压（429/排队），而非硬打上游被封。若要真正自持万级、低延迟、可控成本 → 评估 <b>自托管 vLLM 推理集群（GPU）</b>承载主力流量，外部 API 作溢出。</li>
+  <li><b>qdrant</b>：检索是 turn 内的少数几次调用，读多写少；分片+副本的 qdrant 集群可达数万 QPS。</li>
+</ul>
+<div class="callout warn">
+  <b>必须向上管理的预期：</b>「DeepTutor 支持万级并发」在工程上是可达的，但 <b>万级 <u>在飞解题</u> 的成本与上限由外部 LLM 决定，不由 DeepTutor 代码决定</b>。DeepTutor 侧的优化目标应明确为：<b>(1) 不再有进程内/本地状态阻止水平扩展；(2) 在 LLM 网关做优雅背压，过载时排队/降级而非雪崩；(3) App/状态层能线性加副本</b>。把「10k」锚定在「10k 在线连接 + 在飞解题受控排队」是务实且可交付的。
+</div>
+
+<h2 id="changes">6. 逐文件改造点（fork / 构建期覆盖蓝本）</h2>
+<p>交付方式沿用现有 <code>deeptutor-patch/patch.py</code>（构建期改写镜像内 <code>/app/deeptutor</code>）+ 必要时维护一个轻量 fork。改造点：</p>
+<table>
+  <tr><th>改造</th><th>目标文件</th><th>动作</th><th>面</th><th>阶段</th></tr>
+  <tr><td>开多 worker</td><td><code>Dockerfile</code> start-backend.sh:224</td><td>改用 <code>gunicorn -k uvicorn.workers.UvicornWorker -w $WEB_CONCURRENCY</code>（覆盖镜像内启动脚本或换 compose command）</td><td>A+B</td><td>P0</td></tr>
+  <tr><td>外置会话 store</td><td>新增 <code>session/postgres_store.py</code> 实现 <code>SessionStoreProtocol</code>；改 <code>get_session_store()</code> 选型读 env</td><td>新增文件 + 改工厂；业务层零改动（协议已抽象）</td><td>A</td><td>P1</td></tr>
+  <tr><td>JSON 会话外置</td><td><code>agents/chat/SessionManager</code>（面 B 用）/ <code>base_session_manager.py</code></td><td>把面 B 的 <code>/chat</code> 会话改为也走共享 store（或最小：加文件锁 + 单会话单文件，去掉整文件重写）</td><td>B</td><td>P1</td></tr>
+  <tr><td>turn 事件上 Redis</td><td><code>turn_runtime.py</code> 的事件发布 + <code>subscribe_turn</code></td><td>执行体 publish 到 Redis；订阅 = store 回放 + Redis 订阅；属主判活改租约（路线 A2）</td><td>A</td><td>P3</td></tr>
+  <tr><td>分布式限流</td><td><code>traffic_control.py</code></td><td>令牌桶后端从进程内改为 Redis（Lua 原子）；并发信号量改为全局配额；保留本地二级 bulkhead</td><td>A+B</td><td>P2</td></tr>
+  <tr><td>TutorBot 不每副本启</td><td><code>main.py:147-151</code></td><td>用 env <code>ROLE=worker|bot</code> 门控；bot 只在专用 deployment 启；或 Redis 抢主</td><td>A</td><td>P2</td></tr>
+  <tr><td>输出走对象存储</td><td><code>main.py:258-262</code> + 产物写入处</td><td>动画/可视化产物写 COS/S3，URL 返给前端；静态挂载改重定向</td><td>A</td><td>P2</td></tr>
+  <tr><td>LLM 多 key 网关</td><td>外置组件（LiteLLM 或自研代理）</td><td>DeepTutor 的 <code>base_url</code> 指向网关；网关做多账户负载均衡 + 全局限流 + 重试熔断</td><td>A+B</td><td>P2</td></tr>
+</table>
+<div class="callout">
+  <b>covering patch 的纪律（沿用现有 patch.py 风格）：</b>每处改写都 <code>assert patched != src</code>，上游一旦移动锚点就让构建 <b>响亮失败</b>，而不是静默发一个没打上补丁的镜像。能用 env/配置实现的（如 store 选型、worker 数、bot 角色）优先用配置，不改源码。
+</div>
+
+<h2 id="mathverse">7. MathVerse 集成层改造（<code>mathverse-api</code>）</h2>
+<p>MathVerse 当前对每个请求新建一条 WS、无连接池、无队列（<span class="ev">deeptutor_ws.py:61</span> <code>websockets.connect</code> per call；<code>agent_client.py</code> 仅有进程内熔断器）。万级下需要：</p>
+<ul>
+  <li><b>连接复用/池化</b>：对 DeepTutor LB 维护长连接池，避免每次握手开销与连接风暴。</li>
+  <li><b>有界并发 + 入场队列</b>：MathVerse 侧设全局在飞上限（与 DeepTutor 容量匹配），超出排队，再超出快速 429 + Retry-After（已有 nginx <code>limit_req</code>，需对齐到容量模型）。</li>
+  <li><b>熔断器跨副本</b>：当前 <code>CircuitBreaker</code> 是进程内（<span class="ev">agent_client.py:64-89</span>），多副本下各自计数；可接受，但建议把「DeepTutor 不可用」信号放 Redis 共享，避免每个副本各自试探。</li>
+  <li><b>超时分层</b>：deep_solve 90s 对万级排队场景偏短；区分「排队等待超时」与「流式产出超时」，给前端「排队中」状态而非直接失败。</li>
+  <li><b>降级语义</b>：保持「不可用→提示重试/快速模式」，<b>不</b>伪造未校验的数学解（沿用现有设计文档结论）。</li>
+</ul>
+
+<h2 id="roadmap">8. 分阶段落地路线图</h2>
+<p>按「先让 MathVerse 实际路径（面 B）可扩，再上面 A 高级能力」排序。每阶段带可验证判定标准。</p>
+
+<div class="phase">
+  <div class="head"><span>P0 · 解除单进程枷锁 + 压测基线</span><span class="tag t-bad">奠基</span></div>
+  <div class="body">
+    <ul>
+      <li>改启动为 gunicorn + N uvicorn worker（覆盖 start-backend.sh）。<b>注意</b>：开 worker 前必须确认面 A 的亲和（否则 turn 被误杀）—— 故 P0 先只对 <b>面 B</b> 开 worker，或单容器单 worker + 多副本。</li>
+      <li>搭压测工具（k6/locust 模拟 WS 解题），建立 <b>当前单实例</b> 的并发-延迟-错误率基线曲线（找到拐点）。</li>
+    </ul>
+    <b>判定：</b>有一张「并发 vs P95 延迟 vs 错误率」基线图；多 worker 下面 B 解题正确、无 JSON 会话损坏（先验证 B3 是否在并发下真的损坏）。
+  </div>
+</div>
+
+<div class="phase">
+  <div class="head"><span>P1 · 状态外置（PostgreSQL）</span><span class="tag t-warn">关键路径</span></div>
+  <div class="body">
+    <ul>
+      <li>实现 <code>PostgresSessionStore(SessionStoreProtocol)</code>，env 切换 store 后端；面 A turn/事件日志入 PG。</li>
+      <li>面 B 的 JSON 会话改走共享 store（或最小化：单会话单文件 + 文件锁，消除整文件读-改-写竞态）。</li>
+      <li>引入连接池（asyncpg + PgBouncer）。</li>
+    </ul>
+    <b>判定：</b>两个副本指向同一 PG，会话/历史在副本间一致可见；并发写无丢更新（对比测试）；本地磁盘不再持有会话状态。
+  </div>
+</div>
+
+<div class="phase">
+  <div class="head"><span>P2 · 多副本 + LLM 网关 + 分布式限流</span><span class="tag t-warn">扩展层</span></div>
+  <div class="body">
+    <ul>
+      <li>容器化为无状态副本，k8s 部署 + HPA（按在飞 turn/连接数扩缩）；WS-aware ingress。面 A 加 <code>session_id</code> 会话亲和路由（路线 A1）。</li>
+      <li>上 LLM 网关（多 key/多账户负载均衡 + 全局限流 + 重试/熔断）；DeepTutor <code>base_url</code> 指向它。</li>
+      <li><code>traffic_control.py</code> 令牌桶后端改 Redis；TutorBot 角色门控；输出转对象存储。</li>
+    </ul>
+    <b>判定：</b>加副本能线性提升吞吐；超过 LLM 配额时表现为 <b>排队/429 优雅背压</b> 而非整体超时雪崩；副本重启不丢他人会话。
+  </div>
+</div>
+
+<div class="phase">
+  <div class="head"><span>P3 · 面 A 去亲和（共享事件总线，可选）</span><span class="tag t-info">体验增强</span></div>
+  <div class="body">
+    <ul>
+      <li>turn 事件经 Redis pub/sub 跨副本分发；订阅 = store 回放 + Redis；属主判活改租约/心跳。</li>
+      <li>解除「单会话单进程」约束，允许多 worker、平滑故障转移与重连。</li>
+    </ul>
+    <b>判定：</b>客户端中途断线后由 <b>任意</b> 副本重连可继续 turn；多 worker 下 turn 不被误杀。
+  </div>
+</div>
+
+<div class="phase">
+  <div class="head"><span>P4 · 数据层抗压 + qdrant 集群 + 可观测性</span><span class="tag t-info">稳态</span></div>
+  <div class="body">
+    <ul>
+      <li>PG 分区表/读副本/批量写事件；qdrant 分片+副本；全链路 metrics（在飞 turn、队列深度、LLM 等待、限流命中）+ 链路追踪 + 告警。</li>
+      <li>混沌/容量演练：拔副本、限流上游、慢 LLM，验证背压与恢复。</li>
+    </ul>
+    <b>判定：</b>万级在线连接 + 受控在飞解题下稳定运行 ≥ N 小时，SLO 达标，过载可预测降级。
+  </div>
+</div>
+
+<h2 id="risks">9. 风险登记册</h2>
+<table>
+  <tr><th>风险</th><th>说明</th><th>对策</th></tr>
+  <tr><td>上游 API 演进打飞补丁</td><td>DeepTutor 活跃迭代，fork/patch 锚点会移动</td><td>patch.py 全程 <code>assert</code>；能配置不改码；锁定上游 tag；契约测试守边界</td></tr>
+  <tr><td>面 A 误杀 turn</td><td>开 worker/多副本但没做亲和 → turn 被判孤儿 failed</td><td>P2 先上会话亲和；P3 才去亲和；CI 加「跨进程订阅不杀 turn」回归测试</td></tr>
+  <tr><td>LLM 账户限额=真实天花板</td><td>万级在飞解题超出 DeepSeek 配额</td><td>多账户网关 + 全局限流 + 排队背压；评估自托管 vLLM 承载主力</td></tr>
+  <tr><td>成本失控</td><td>万级流式 token 成本巨大</td><td>freemium 把深度解题/research/可视化划付费档；WS 会话设时长/并发上限；缓存常见题</td></tr>
+  <tr><td>PG 成为新单点</td><td>状态集中后 PG 写入压力</td><td>连接池 + 批量写事件 + 分区 + 读副本；必要时事件日志走专用存储</td></tr>
+  <tr><td>暴露面</td><td>DeepTutor 端点 docker 里 <code>ENABLE_AUTH=false</code></td><td>DeepTutor/PG/Redis/qdrant 仅内网；对外只暴露 MathVerse BFF</td></tr>
+</table>
+
+<h2 id="decisions">10. 需要你拍板的决策</h2>
+<ol>
+  <li><b>面 A 是否在范围内？</b> MathVerse 当前只用面 B。若近期不需要 DeepTutor 自带前端的「重连/订阅/取消」高级 UX，可<b>暂缓 P3 和面 A 的亲和复杂度</b>，把火力集中在面 B 的万级（P0-P2 即可达成）。</li>
+  <li><b>推理层策略：</b>纯外部 API（多账户网关）起步，还是同时规划自托管 vLLM 集群？前者快、成本随量线性且受上游限额；后者重、需 GPU，但才能真正自持低延迟万级。</li>
+  <li><b>状态层选型：</b>直接上 PostgreSQL（推荐，为万级而生），还是先用上游已有的 PocketBase（快但本质单节点 SQLite，扛不到万级写）过渡？</li>
+  <li><b>编排平台：</b>上 k8s（HPA/ingress 成熟），还是 docker-compose + 多机手工（轻但扩缩与 WS 亲和要自己搭）？</li>
+</ol>
+<div class="callout good">
+  <b>我的推荐起步切片（若你同意，我下一步就做）：</b>把范围锁定在 <b>面 B 的万级</b> ——
+  P0（gunicorn 多 worker + 压测基线）→ P1（PostgresSessionStore + 面 B 会话外置）→ P2（无状态副本 + LLM 多 key 网关 + Redis 分布式限流）。
+  这条线不触碰 turn-runtime 的亲和复杂度，是 MathVerse 实际路径、风险最低、收益最直接的万级路径。面 A（P3）作为后续增量。
+</div>
+
+<hr>
+<p class="small muted">本文档依据 HKUDS/DeepTutor <code>main</code> 分支真实源码撰写（2026-06-02 核查），证据均标注 file:line。按本仓库约定，所有文档采用 HTML。配套：<code>docs/mathverse-design-optimization-20260601.html</code>（集成契约核查）。</p>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+# Edge: public Ingress + autoscaling. Only mathverse-api is exposed; DeepTutor,
+# Postgres, Redis, qdrant stay cluster-internal.
+#
+# Thanks to P3a (face-A de-affinity) the ingress needs NO session affinity — any
+# replica can serve any turn's stream. So this is a plain WS-aware proxy.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mathverse
+  annotations:
+    # Long-lived WebSockets (nginx-ingress passes Upgrade headers automatically).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # TLS via cert-manager (optional — or reference an existing cert secret below).
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: REPLACE_ME_INGRESS_CLASS    # e.g. nginx
+  tls:
+    - hosts:
+        - REPLACE_ME_DOMAIN                       # e.g. kuangyebar.cn
+      secretName: mathverse-tls                   # cert-manager fills this, or pre-create it
+  rules:
+    - host: REPLACE_ME_DOMAIN
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mathverse-api
+                port:
+                  number: 8002
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: deeptutor-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: deeptutor-web
+  minReplicas: 3
+  maxReplicas: 40            # see design doc §5 capacity model (~10k in-flight turns)
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    # For 万级 prefer a custom metric (in-flight turns / active WS connections)
+    # over CPU — chat turns are I/O-bound on the LLM, so CPU under-signals load.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300   # drain long WS gracefully; don't flap
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mathverse-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mathverse-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

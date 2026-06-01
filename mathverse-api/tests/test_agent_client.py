@@ -1,4 +1,5 @@
 """Tests for AgentClient — WS calls mocked at the deeptutor_ws boundary."""
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 from app.services.agent_client import AgentClient, AgentUnavailableError, SolveResult
@@ -110,6 +111,40 @@ async def test_circuit_breaker_recovery():
     client.circuit.is_open = True
     client.circuit.last_failure_time = 0  # Long ago
     assert client.circuit.can_try() is True
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_sheds_when_saturated():
+    """When all in-flight slots are held, a new call times out fast and raises
+    AgentUnavailableError (so the route degrades to DeepSeek) WITHOUT tripping
+    the circuit breaker — it's backpressure, not an engine fault."""
+    client = AgentClient("http://mock:8001")
+    client._inflight = asyncio.Semaphore(1)
+    client._admission_timeout = 0.05
+    await client._inflight.acquire()  # occupy the only slot
+
+    async def _never():
+        await asyncio.sleep(10)
+        return {"answer": "x", "session_id": None, "statuses": []}
+
+    coro = _never()
+    with pytest.raises(AgentUnavailableError, match="overloaded"):
+        await client._guarded(coro)
+    # backpressure must not count as a DeepTutor failure
+    assert client.circuit.failures == 0
+    assert client.circuit.is_open is False
+
+
+@pytest.mark.asyncio
+async def test_admission_gate_releases_slot_after_call():
+    """A completed call must release its slot so capacity is reusable."""
+    client = AgentClient("http://mock:8001")
+    client._inflight = asyncio.Semaphore(1)
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "ok", "session_id": None, "statuses": []}
+        for _ in range(3):  # would deadlock on slot 2 if release were missing
+            assert await client.quick_solve("1+1=?", "college") == "ok"
+    assert client._inflight._value == 1  # slot returned
 
 
 def test_solve_result_dataclass():

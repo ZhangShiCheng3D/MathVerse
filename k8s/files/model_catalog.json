@@ -1,0 +1,21 @@
+{
+  "_comment": "DeepTutor model profiles routed through the LiteLLM gateway (P2). Seeded into each DeepTutor pod's data/user/settings/ by an initContainer. base_url points at the in-cluster gateway Service; api_key is the gateway master key (injected by the initContainer from the LITELLM_MASTER_KEY secret). binding stays openai (gateway is OpenAI-compatible).",
+  "active_llm": "deepseek-via-gateway",
+  "active_embedding": "dashscope-via-gateway",
+  "llm_profiles": {
+    "deepseek-via-gateway": {
+      "binding": "openai",
+      "model": "deepseek-chat",
+      "base_url": "http://litellm:4000",
+      "api_key": "__LITELLM_MASTER_KEY__"
+    }
+  },
+  "embedding_profiles": {
+    "dashscope-via-gateway": {
+      "binding": "openai",
+      "model": "text-embedding-v3",
+      "base_url": "http://litellm:4000",
+      "api_key": "__LITELLM_MASTER_KEY__"
+    }
+  }
+}
