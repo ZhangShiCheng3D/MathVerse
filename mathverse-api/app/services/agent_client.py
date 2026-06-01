@@ -150,6 +150,13 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
         return data["answer"]
 
+    async def vision_solve(self, question: str, image_base64: str) -> str:
+        """Photo math solving via DeepTutor vision WS. Returns the prose solution."""
+        data = await self._guarded(
+            deeptutor_ws.vision_solve(question, image_base64=image_base64, timeout=120.0)
+        )
+        return data["answer"]
+
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
         """Generate prose via DeepTutor chat WS (mode=chat), with a prompt template as system preamble."""
         template_dir = os.path.join(os.path.dirname(__file__), "../../prompts")

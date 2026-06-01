@@ -33,6 +33,12 @@ class SimilarRequest(BaseModel):
     stage: str = "college"
 
 
+class VisionRequest(BaseModel):
+    image_base64: str
+    question: str = "请解答图片中的数学题，给出最终答案与关键步骤。"
+    stage: str = "college"
+
+
 async def _fallback_solve(question: str, stage: str) -> str:
     """DeepTutor down → simplified DeepSeek direct answer. 503 if that fails too."""
     try:
@@ -125,6 +131,28 @@ async def quick_solve(
     log_event(db, "solve", user.id if user else None, {"type": "quick", "degraded": degraded})
 
     return {"answer": response, "degraded": degraded}
+
+
+@router.post("/vision")
+async def vision_solve(
+    req: VisionRequest,
+    user: User | None = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    """Photo solve via DeepTutor vision WS. No DeepSeek fallback (it isn't multimodal)."""
+    if user:
+        enforce_solve_quota(user, db)
+
+    try:
+        answer = await agent_client.vision_solve(req.question, req.image_base64)
+    except AgentUnavailableError:
+        raise HTTPException(status_code=503, detail="拍照解题服务暂时不可用，请稍后再试")
+
+    if user:
+        _archive_solve(db, user, "[拍照题目]", req.stage, "vision", {"answer": answer}, None)
+    log_event(db, "solve", user.id if user else None, {"type": "vision"})
+
+    return {"answer": answer}
 
 
 @router.post("/step-explain")

@@ -71,6 +71,17 @@ async def test_generate_lecture_uses_chat_ws():
 
 
 @pytest.mark.asyncio
+async def test_vision_solve_uses_vision_ws():
+    """Photo solve goes through the vision WS and returns its aggregated answer."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.vision_solve", new_callable=AsyncMock) as mock_vision:
+        mock_vision.return_value = {"answer": "答案：2x"}
+        result = await client.vision_solve("解这题", "ZmFrZQ==")
+        assert result == "答案：2x"
+        assert mock_vision.call_args.kwargs["image_base64"] == "ZmFrZQ=="
+
+
+@pytest.mark.asyncio
 async def test_generate_quiz_uses_chat_ws_and_parses_json():
     """Regression: quiz goes through chat WS (mode=quiz), parsing the JSON question block."""
     client = AgentClient("http://mock:8001")

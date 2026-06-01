@@ -68,6 +68,25 @@ def test_quick_solve_success():
         assert resp.json()["answer"] == "答案是42"
 
 
+def test_vision_solve_success():
+    with patch("app.routes.solve.agent_client.vision_solve", new_callable=AsyncMock) as mock:
+        mock.return_value = "由图可知 f(x)=x^2，故 f'(x)=2x。"
+        resp = client.post("/api/solve/vision", json={
+            "image_base64": "ZmFrZQ==",
+            "stage": "college",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["answer"].startswith("由图可知")
+
+
+def test_vision_solve_unavailable():
+    from app.services.agent_client import AgentUnavailableError
+    with patch("app.routes.solve.agent_client.vision_solve", new_callable=AsyncMock) as mock:
+        mock.side_effect = AgentUnavailableError("down")
+        resp = client.post("/api/solve/vision", json={"image_base64": "ZmFrZQ=="})
+        assert resp.status_code == 503
+
+
 def test_step_explain_requires_auth():
     """Regression: must not be an open, unauthenticated DeepSeek proxy."""
     resp = client.post("/api/solve/step-explain", json={
