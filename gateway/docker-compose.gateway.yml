@@ -1,0 +1,40 @@
+# LLM gateway + its Redis, joining the existing `mathverse` network so DeepTutor
+# can reach it at http://litellm:4000. Combine with the main compose file:
+#
+#   docker compose -f docker-compose.yml -f gateway/docker-compose.gateway.yml up -d
+#
+# Required env (in .env): LITELLM_MASTER_KEY, DEEPSEEK_KEY_1[, _2…], DASHSCOPE_KEY_1.
+# Then repoint DeepTutor's model_catalog.json at the gateway (see gateway/README.md).
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+    volumes:
+      - ./gateway/litellm-config.yaml:/app/config.yaml:ro
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - DEEPSEEK_KEY_1=${DEEPSEEK_KEY_1}
+      - DEEPSEEK_KEY_2=${DEEPSEEK_KEY_2:-}
+      - DASHSCOPE_KEY_1=${DASHSCOPE_KEY_1}
+      - REDIS_HOST=litellm-redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+    depends_on:
+      - litellm-redis
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+  litellm-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+    networks:
+      - mathverse
+
+# Same definition as the base compose's network — merging multiple -f files reuses
+# it (do NOT mark external here, that would conflict with the base's driver: bridge).
+networks:
+  mathverse:
+    driver: bridge

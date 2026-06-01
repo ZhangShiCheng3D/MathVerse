@@ -1,0 +1,75 @@
+# LiteLLM gateway — multi-account LLM load balancer + global rate limiting for the
+# DeepTutor stack (P2). Sits between DeepTutor and DeepSeek/DashScope so that
+# 10k in-flight solves don't hammer a single account past its rate limit.
+#
+# How it plugs in (DeepTutor needs NO code change):
+#   In data/user/settings/model_catalog.json, point the active LLM profile's
+#   base_url at this gateway and use the gateway master key:
+#     LLM:        base_url=http://litellm:4000   api_key=$LITELLM_MASTER_KEY  model=deepseek-chat
+#     EMBEDDING:  base_url=http://litellm:4000   api_key=$LITELLM_MASTER_KEY  model=text-embedding-v3
+#     VISION:     base_url=http://litellm:4000   api_key=$LITELLM_MASTER_KEY  model=qwen-vl-max
+#   (binding stays "openai" — LiteLLM is OpenAI-compatible.)
+#
+# Scaling to more throughput = add more <provider>_KEY_n entries below (one per
+# account/key). LiteLLM load-balances across all entries sharing a model_name and
+# enforces the per-entry rpm/tpm; Redis makes those limits global across gateway
+# replicas. Tune rpm/tpm to each account's real DeepSeek/DashScope quota.
+
+model_list:
+  # ── DeepSeek chat (text solve/chat) — one entry PER account/key ──────────────
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_KEY_1
+      api_base: https://api.deepseek.com/v1
+      rpm: 600          # set to this account's actual DeepSeek RPM limit
+      tpm: 1000000      # ...and TPM limit
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_KEY_2
+      api_base: https://api.deepseek.com/v1
+      rpm: 600
+      tpm: 1000000
+  # Add DEEPSEEK_KEY_3, _4, … as you onboard more accounts.
+
+  # ── DashScope embeddings (RAG) ───────────────────────────────────────────────
+  - model_name: text-embedding-v3
+    litellm_params:
+      model: openai/text-embedding-v3
+      api_key: os.environ/DASHSCOPE_KEY_1
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+      rpm: 600
+
+  # ── DashScope qwen-vl (photo-solving / vision) ───────────────────────────────
+  - model_name: qwen-vl-max
+    litellm_params:
+      model: openai/qwen-vl-max
+      api_key: os.environ/DASHSCOPE_KEY_1
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+      rpm: 300
+
+router_settings:
+  # Spread load by remaining capacity so no single account is hot.
+  routing_strategy: usage-based-routing-v2
+  # Retry a failed call on a DIFFERENT key before surfacing an error.
+  num_retries: 2
+  retry_after: 5
+  allowed_fails: 3
+  cooldown_time: 30
+  # Redis makes rpm/tpm + cooldowns GLOBAL across all gateway replicas — essential
+  # once the gateway itself is scaled out. Single-replica works without it.
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+
+litellm_settings:
+  # Drop a slow/stuck upstream call rather than holding a worker forever.
+  request_timeout: 120
+  # Backpressure: when all keys for a model are at their limit, callers get a
+  # clear 429 to retry/queue on, instead of silently overloading an account.
+  num_retries: 2
+
+general_settings:
+  # DeepTutor authenticates to the gateway with this single master key.
+  master_key: os.environ/LITELLM_MASTER_KEY
