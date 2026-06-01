@@ -56,6 +56,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class MpLoginRequest(BaseModel):
+    code: str
+
+
 @router.get("/wechat/login")
 async def wechat_login(request: Request):
     """Initiate WeChat OAuth flow. Redirects to WeChat authorization page."""
@@ -131,6 +135,56 @@ async def wechat_callback(request: Request, code: str, state: str, db: Session =
             "avatar_url": user.avatar_url,
             "current_stage": user.current_stage,
             "tier": user.tier,
+        },
+    }
+
+
+@router.post("/wechat/mp-login")
+async def wechat_mp_login(req: MpLoginRequest, db: Session = Depends(get_db)):
+    """Mini Program login: exchange a wx.login() code via jscode2session (no redirect)."""
+    if not settings.wechat_app_id or not settings.wechat_app_secret:
+        raise HTTPException(500, "WECHAT_APP_ID/SECRET not configured")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://api.weixin.qq.com/sns/jscode2session",
+            params={
+                "appid": settings.wechat_app_id,
+                "secret": settings.wechat_app_secret,
+                "js_code": req.code,
+                "grant_type": "authorization_code",
+            },
+        )
+        data = resp.json()
+    if data.get("errcode"):
+        raise HTTPException(400, f"WeChat error: {data.get('errmsg')}")
+
+    openid = data["openid"]
+    union_id = data.get("unionid", openid)
+    user = db.query(User).filter(User.wechat_union_id == union_id).first()
+    if not user:
+        user = User(
+            wechat_union_id=union_id,
+            wechat_open_id=openid,
+            nickname="数学探索者",
+            avatar_url="",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    log_event(db, "login", user.id, {"channel": "wechat_mp"})
+    return {
+        "access_token": create_access_token(user.id),
+        "refresh_token": create_refresh_token(user.id),
+        "user": {
+            "id": user.id,
+            "nickname": user.nickname,
+            "avatar_url": user.avatar_url,
+            "current_stage": user.current_stage,
+            "exam_mode": user.exam_mode,
+            "tier": user.tier,
+            "streak_days": user.streak_days,
         },
     }
 
