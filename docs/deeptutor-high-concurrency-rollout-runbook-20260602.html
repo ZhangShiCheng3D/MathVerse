@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepTutor 高并发优化 · 上线手册 (Rollout Runbook) · 2026-06-02</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a2029;--panel2:#222b36;--ink:#e6edf3;--muted:#9aa7b4;--accent:#4ea1ff;--good:#3fb950;--warn:#d29922;--bad:#f85149;--line:#2d3742;--code:#0b0f14;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:48px 28px 120px}
+  h1{font-size:28px;margin:0 0 8px}
+  .sub{color:var(--muted)}
+  h2{font-size:21px;margin:42px 0 12px;padding-top:10px;border-top:1px solid var(--line)}
+  h3{font-size:16px;margin:22px 0 8px;color:#cdd9e5}
+  code,kbd{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px/1.5 "JetBrains Mono",Consolas,monospace;color:#9ad1ff}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow:auto;font:12.5px/1.55 "JetBrains Mono",Consolas,monospace;color:#c9d6e3}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2)}
+  .stage{border:1px solid var(--line);border-radius:10px;margin:18px 0;overflow:hidden}
+  .stage .h{background:var(--panel2);padding:12px 16px;font-weight:700;display:flex;justify-content:space-between}
+  .stage .b{padding:14px 18px}
+  .gate{border-left:4px solid var(--good);background:var(--panel);padding:10px 14px;margin:12px 0;border-radius:0 8px 8px 0}
+  .rb{border-left:4px solid var(--warn);background:var(--panel);padding:10px 14px;margin:12px 0;border-radius:0 8px 8px 0}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0}
+  .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:4px;padding:1px 7px}
+  .t-good{background:rgba(63,185,80,.16);color:#56d364;border:1px solid rgba(63,185,80,.4)}
+  .t-warn{background:rgba(210,153,34,.16);color:#e3b341;border:1px solid rgba(210,153,34,.4)}
+  .muted{color:var(--muted)} ul,ol{padding-left:22px} li{margin:4px 0}
+  b.k{color:#9ad1ff;font-family:monospace;font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>DeepTutor 高并发优化 · 上线手册</h1>
+<div class="sub">Rollout Runbook · 2026-06-02 · 配套 <code>docs/deeptutor-high-concurrency-optimization-20260602.html</code> · PR #2</div>
+
+<div class="callout">
+  <b>核心前提：一切皆 env 开关，默认 = 现状。</b> 这套优化没有「大爆炸式切换」。每个能力由一个环境变量门控，<b>不设就是当前行为</b>。所以上线 = <b>逐个拧开关 + 每步一个验证门 + 随时可回滚（关掉 env 即回默认）</b>。本手册给出安全顺序。<b>顺序很重要</b>：必须先有共享状态(P1) + 去亲和(P3a) 才能开多 worker，否则面 A 的 turn 会被误杀。
+</div>
+
+<h2>开关速查</h2>
+<table>
+<tr><th>开关</th><th>组件</th><th>默认</th><th>作用</th><th>何时拧</th></tr>
+<tr><td><b class="k">DEEPTUTOR_PG_DSN</b></td><td>DeepTutor</td><td>未设</td><td>会话/turn/事件落共享 Postgres（面 A+面 B）；同时启用 P3a 去亲和</td><td>Stage 2</td></tr>
+<tr><td><b class="k">WEB_CONCURRENCY</b></td><td>DeepTutor</td><td><code>1</code></td><td>gunicorn worker 数</td><td>Stage 3（PG 之后）</td></tr>
+<tr><td><b class="k">DEEPTUTOR_ROLE</b></td><td>DeepTutor</td><td><code>all</code></td><td><code>web</code>/<code>bot</code> 拆分，避免重复启 bot</td><td>Stage 5（多副本）</td></tr>
+<tr><td>网关 base_url（model_catalog.json）</td><td>DeepTutor</td><td>直连 DeepSeek</td><td>改指 LiteLLM 网关</td><td>Stage 4</td></tr>
+<tr><td><b class="k">DEEPTUTOR_MAX_CONCURRENCY</b></td><td>mathverse-api</td><td><code>64</code></td><td>入场背压上限</td><td>随时</td></tr>
+</table>
+
+<h2>安全上线顺序</h2>
+
+<div class="stage">
+  <div class="h"><span>Stage 0 · 换镜像，全开关默认 → 验证无回归</span><span class="tag t-good">基线</span></div>
+  <div class="b">
+    构建打补丁镜像并部署，<b>所有开关保持默认</b>（<code>WEB_CONCURRENCY=1</code>、不设 <code>DEEPTUTOR_PG_DSN</code>、<code>DEEPTUTOR_ROLE=all</code>）。此时行为应与上线前<b>完全一致</b>，只是启动器换成了 gunicorn(-w 1)。
+<pre>docker build -t &lt;reg&gt;/deeptutor-patched:&lt;tag&gt; deeptutor-patch/   # patch.py 全程 assert，构建若过=锚点没漂移
+# 部署后看日志应有: "patched ok: ... backend launcher -&gt; gunicorn(...)"</pre>
+    <div class="gate"><b>验证门：</b>现有功能全绿（解题/拍照/讲解）；DeepTutor 启动日志正常；<code>/</code> 健康检查 200。</div>
+    <div class="rb"><b>回滚：</b>换回上游镜像 <code>ghcr.io/hkuds/deeptutor:latest</code>（仅丢失本次拍照补丁）。</div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="h"><span>Stage 1 · 起 Postgres → 跑平价测试</span><span class="tag t-good">地基</span></div>
+  <div class="b">
+    起一个 <b>测试用</b> Postgres（独立于生产数据），跑契约/平价测试，确认 Postgres store 与 SQLite store 行为一致、P3a 回归通过。<b>此步不碰生产</b>。
+<pre># 在打补丁镜像内（或上游 checkout + 装依赖）：
+pip install pytest pytest-asyncio asyncpg
+DEEPTUTOR_PG_DSN=postgresql://u:p@pg-test:5432/dt_test \
+  pytest deeptutor-patch/tests/test_session_store_parity.py -v</pre>
+    <div class="gate"><b>验证门：</b>SQLite + Postgres 两个后端的所有断言全过；<code>test_p3_tail_foreign_turn_streams_without_failing</code> 通过（证明跨进程订阅不再误杀 turn）。</div>
+    <div class="rb"><b>回滚：</b>无影响（纯测试）。不过门则停下排查，不要进 Stage 2。</div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="h"><span>Stage 2 · 单副本开 DEEPTUTOR_PG_DSN → 验证状态外置</span><span class="tag t-warn">切状态</span></div>
+  <div class="b">
+    给<b>单个</b> DeepTutor 副本设 <code>DEEPTUTOR_PG_DSN</code>（指向<b>生产</b> Postgres），<code>WEB_CONCURRENCY</code> 仍为 1。会话/turn/事件从此落 PG。
+    <ul>
+      <li>面 A：发起一次解题，确认 <code>sessions</code>/<code>turns</code>/<code>turn_events</code> 表有数据；中途断线重连能续上。</li>
+      <li>面 B：<code>/api/v1/chat</code> 解题，确认会话进 PG（不再写本地 JSON）。</li>
+    </ul>
+    <div class="gate"><b>验证门：</b>新会话出现在 PG；重连/历史正常；无 <code>PostgresSessionStore requires DEEPTUTOR_PG_DSN</code> 之类报错。</div>
+    <div class="rb"><b>回滚：</b>去掉 <code>DEEPTUTOR_PG_DSN</code> → 立即回到 SQLite/JSON（旧会话不迁移，可接受）。</div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="h"><span>Stage 3 · 调大 WEB_CONCURRENCY → 压测找拐点</span><span class="tag t-warn">加并发</span></div>
+  <div class="b">
+    现在 PG(P1) + 去亲和(P3a) 都就位，开多 worker 才安全。逐步 <code>WEB_CONCURRENCY=2 → 4 → 8</code>，每档用 <code>load-tests/</code> 压测。
+<pre>for v in 10 25 50 100 200; do TARGET=ws://127.0.0.1:8001 VUS=$v k6 run load-tests/deeptutor-chat-ws.js; done</pre>
+    重点看：<b>不是单条延迟</b>（被 LLM 吐字速度主导），而是 <b>拐点处的 VU 数、turn_error 率、有无 turn 被误杀/会话损坏</b>。
+    <div class="gate"><b>验证门：</b>加 worker 后吞吐上升、error 率平稳；无「turn failed」异常；PG 无写冲突报错。</div>
+    <div class="rb"><b>回滚：</b><code>WEB_CONCURRENCY=1</code>。若多 worker 下出现 turn 误杀，说明 P3a 未生效（检查 <code>DEEPTUTOR_PG_DSN</code> 是否设上），回退并排查。</div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="h"><span>Stage 4 · 起 LiteLLM 网关 → 改 model_catalog 指向它</span><span class="tag t-warn">接网关</span></div>
+  <div class="b">
+    起 <code>gateway/</code>（litellm + redis），把 DeepTutor <code>model_catalog.json</code> 的 LLM/embedding/vision <code>base_url</code> 改成 <code>http://litellm:4000</code>、<code>api_key</code> 用网关 master key。<b>真实 key 只配在网关</b>。
+    <div class="callout" style="border-left-color:var(--bad)"><b>务必先核对 model_catalog.json 真实 schema</b>（见 k8s/README 警告）：在能跑的实例上 <code>cat data/user/settings/model_catalog.json</code>，按真实字段名改，否则 LLM 调用会超时。</div>
+    <div class="gate"><b>验证门：</b>解题仍正常；<code>curl http://localhost:4000/health -H "Authorization: Bearer $KEY"</code> 健康；网关日志看到多 key 轮询；故意压高看是否优雅 429 而非账户被封。</div>
+    <div class="rb"><b>回滚：</b>把 <code>base_url</code> 改回 <code>https://api.deepseek.com/v1</code> + 直连 key。</div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="h"><span>Stage 5 · 多副本 (k8s) + ROLE 拆分</span><span class="tag t-warn">横向扩</span></div>
+  <div class="b">
+    填好 <code>k8s/</code> 占位符，<code>kubectl apply -k k8s/</code>。<code>deeptutor-web</code> 多副本(<code>ROLE=web</code>) + <code>deeptutor-bot</code> 单副本(<code>ROLE=bot</code>)。因 P3a 去亲和，<b>ingress 无需 session 亲和</b>。
+    <ul>
+      <li>验证跨副本流式：A 副本发起的 turn，从 B 副本订阅能正常流（P3a 生效）。</li>
+      <li>验证 bot 只启一次（web 副本日志应有 "skipping TutorBot auto-start"）。</li>
+      <li>HPA：加压看 <code>deeptutor-web</code> 自动扩；万级建议换在飞-turn 自定义指标（CPU 会低估 IO 密集负载）。</li>
+    </ul>
+    <div class="gate"><b>验证门：</b>加副本线性提升吞吐；跨副本订阅不丢/不误杀；bot 不重复；超 LLM 配额时表现为排队/429 而非雪崩。</div>
+    <div class="rb"><b>回滚：</b>缩回单副本；或 <code>kubectl rollout undo</code>。</div>
+  </div>
+</div>
+
+<h2>上线时要盯的信号</h2>
+<table>
+<tr><th>信号</th><th>健康</th><th>报警含义</th></tr>
+<tr><td>turn_error / WS 异常关闭率</td><td>平稳低位</td><td>多 worker 误杀 turn（P3a/PG 没配对）</td></tr>
+<tr><td>PG 写延迟 / 连接池等待</td><td>低</td><td>事件日志写入压力 → 加池/批量/读副本</td></tr>
+<tr><td>网关 429 / key cooldown</td><td>偶发</td><td>账户配额见顶 → 加账户 key（真实天花板，见设计文档 §5）</td></tr>
+<tr><td>mathverse-api 入场背压拒绝数</td><td>低</td><td>DeepTutor 容量不足 → 扩 deeptutor-web</td></tr>
+<tr><td>deeptutor-web 副本数 (HPA)</td><td>随负载</td><td>顶到 maxReplicas → 调高上限/加节点</td></tr>
+</table>
+
+<h2>Go / No-Go 总检查单</h2>
+<ul>
+<li>☐ Stage 0：打补丁镜像无回归</li>
+<li>☐ Stage 1：平价 + P3a 回归测试全绿</li>
+<li>☐ Stage 2：会话确实落 PG、重连正常</li>
+<li>☐ Stage 3：多 worker 下吞吐升、error 平、无误杀</li>
+<li>☐ Stage 4：网关接入、model_catalog schema 已核对、优雅 429</li>
+<li>☐ Stage 5：跨副本订阅 OK、bot 单实例、HPA 生效</li>
+</ul>
+
+<div class="callout">
+<b>未包含（低优先级残留，按需再做）：</b>
+<ul>
+<li><b>输出转对象存储</b>（<code>main.py:258</code>）—— 仅当用到 DeepTutor 的 visualize/animation 产物时需要（多副本下一副本产物另一副本取不到）。MathVerse 不经 DeepTutor 用产物，故可缓。</li>
+<li><b>P3b</b>：Redis pub/sub 替代 P3a 的轮询（更低延迟/更省 DB）+ 跨进程 <code>submit_user_reply</code>/<code>cancel</code> 转发。仅影响 ask_user 交互流；MathVerse 不用。</li>
+</ul>
+</div>
+
+<p class="muted" style="font-size:12.5px;margin-top:30px">每个 Stage 的回滚都是「关掉对应 env / 换回镜像」，因为全部改动零默认变化。遇到不过门，停在该 Stage 排查，不要叠加下一步。</p>
+
+</div>
+</body>
+</html>
