@@ -55,6 +55,11 @@ services:
       - EMBEDDING_BINDING=dashscope
       - EMBEDDING_MODEL=text-embedding-v3
       - EMBEDDING_API_KEY=${DASHSCOPE_API_KEY}
+      # Dedicated vision model for photo-solving (read by the deeptutor-patch
+      # overlay). Reuses the DashScope key; keeps text LLM on DeepSeek.
+      - VISION_API_KEY=${DASHSCOPE_API_KEY}
+      - VISION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+      - VISION_MODEL=qwen-vl-max
       - WEB_SEARCH=duckduckgo
       - ENABLE_AUTH=false
     volumes:
