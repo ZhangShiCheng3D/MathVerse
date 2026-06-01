@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { View, Text, ScrollView, Button } from '@tarojs/components';
+import { useEffect, useState } from 'react';
+import { View, Text, ScrollView, Button, Input } from '@tarojs/components';
 import { useLearnStore } from '../../stores/learn';
 
 const STAGES = [
@@ -19,9 +19,10 @@ const masteryColor = (m: number) => {
 
 export default function LearnPage() {
   const {
-    stage, setStage, kgData, selectedKp, lecture, exercises, activeTab,
-    isLoading, fetchKg, selectKp, fetchLecture, fetchExercise,
+    stage, setStage, kgData, selectedKp, lecture, exercises, grades, gradingIndex, activeTab,
+    isLoading, fetchKg, selectKp, fetchLecture, fetchExercise, gradeAnswer,
   } = useLearnStore();
+  const [answers, setAnswers] = useState<Record<number, string>>({});
 
   useEffect(() => {
     fetchKg();
@@ -174,26 +175,59 @@ export default function LearnPage() {
           {isLoading ? (
             <Text style={{ color: '#9ca3af' }}>AI正在出题...</Text>
           ) : exercises.length ? (
-            exercises.map((q, i) => (
-              <View key={i} style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '12px', marginBottom: '12px' }}>
-                <Text style={{ fontSize: '15px', fontWeight: '600', display: 'block' }}>
-                  {i + 1}. {q.question}
-                </Text>
-                {q.options?.map((opt, j) => (
-                  <Text key={j} style={{ fontSize: '14px', color: '#374151', display: 'block', marginTop: '6px' }}>
-                    {opt}
+            exercises.map((q, i) => {
+              const grade = grades[i];
+              return (
+                <View key={i} style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '12px', marginBottom: '12px' }}>
+                  <Text style={{ fontSize: '15px', fontWeight: '600', display: 'block' }}>
+                    {i + 1}. {q.question}
                   </Text>
-                ))}
-                <Text style={{ fontSize: '14px', color: '#4F46E5', display: 'block', marginTop: '8px' }}>
-                  答案：{q.answer}
-                </Text>
-                {q.analysis && (
-                  <Text style={{ fontSize: '13px', color: '#6b7280', display: 'block', marginTop: '4px', lineHeight: '1.6' }}>
-                    解析：{q.analysis}
-                  </Text>
-                )}
-              </View>
-            ))
+                  {q.options?.map((opt, j) => (
+                    <Text key={j} style={{ fontSize: '14px', color: '#374151', display: 'block', marginTop: '6px' }}>
+                      {opt}
+                    </Text>
+                  ))}
+
+                  <Input
+                    value={answers[i] || ''}
+                    placeholder="输入你的答案"
+                    disabled={!!grade}
+                    onInput={(e) => setAnswers((a) => ({ ...a, [i]: e.detail.value }))}
+                    style={{ marginTop: '10px', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', backgroundColor: '#fff' }}
+                  />
+
+                  {!grade && (
+                    <Button
+                      style={{ marginTop: '8px', borderRadius: '9999px', backgroundColor: '#4F46E5', color: '#fff', fontSize: '14px' }}
+                      loading={gradingIndex === i}
+                      disabled={gradingIndex !== null || !(answers[i] || '').trim()}
+                      onClick={() => gradeAnswer(i, answers[i] || '')}
+                    >
+                      提交判分
+                    </Button>
+                  )}
+
+                  {grade && (
+                    <View style={{ marginTop: '10px' }}>
+                      <Text style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', color: grade.correct ? '#22c55e' : '#ef4444' }}>
+                        {grade.correct ? '✓ 正确' : '✗ 错误'}
+                      </Text>
+                      <Text style={{ fontSize: '13px', color: '#6b7280', display: 'block', marginTop: '4px', lineHeight: '1.6' }}>
+                        {grade.feedback}
+                      </Text>
+                      <Text style={{ fontSize: '14px', color: '#4F46E5', display: 'block', marginTop: '8px' }}>
+                        参考答案：{q.answer}
+                      </Text>
+                      {q.analysis && (
+                        <Text style={{ fontSize: '13px', color: '#6b7280', display: 'block', marginTop: '4px', lineHeight: '1.6' }}>
+                          解析：{q.analysis}
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </View>
+              );
+            })
           ) : (
             <Text style={{ color: '#9ca3af' }}>点击"练习"开始做题</Text>
           )}
