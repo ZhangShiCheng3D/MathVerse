@@ -128,10 +128,32 @@ BOTS_NEW = (
 assert mi.count(BOTS_OLD) == 1, "tutorbot auto_start anchor not found/ambiguous — upstream changed"
 open(main_f, "w", encoding="utf-8").write(mi.replace(BOTS_OLD, BOTS_NEW))
 
+# 7) [P1 face-B externalization] Route /api/v1/chat's session persistence to the
+#    shared store (Postgres) when DEEPTUTOR_PG_DSN is set, instead of the legacy
+#    unlocked JSON-file SessionManager. Default (no DSN) keeps the JSON manager.
+# The selector lives in the WS router; patch its _get_session_manager() factory.
+chat_router_f = f"{ROOT}/api/routers/chat.py"
+ci = open(chat_router_f, encoding="utf-8").read()
+CHAT_OLD = (
+    "def _get_session_manager() -> SessionManager:\n"
+    "    return SessionManager()\n"
+)
+CHAT_NEW = (
+    "def _get_session_manager():\n"
+    "    import os as _os\n"
+    '    if _os.environ.get("DEEPTUTOR_PG_DSN"):\n'
+    "        from deeptutor.agents.chat._pg_session_manager import get_pg_backed_session_manager\n"
+    "        return get_pg_backed_session_manager()\n"
+    "    return SessionManager()\n"
+)
+assert ci.count(CHAT_OLD) == 1, "chat _get_session_manager anchor not found/ambiguous — upstream changed"
+open(chat_router_f, "w", encoding="utf-8").write(ci.replace(CHAT_OLD, CHAT_NEW))
+
 print(
     f"patched ok: verbose removed, {count} vision construction site(s) updated, "
     "backend launcher -> gunicorn(UvicornWorker, WEB_CONCURRENCY), "
     f"overlay files: {len(overlay_copied)} ({', '.join(overlay_copied) or 'none'}), "
     "get_session_store -> Postgres when DEEPTUTOR_PG_DSN set, "
-    "TutorBot auto-start gated by DEEPTUTOR_ROLE"
+    "TutorBot auto-start gated by DEEPTUTOR_ROLE, "
+    "chat session persistence -> shared store when DEEPTUTOR_PG_DSN set"
 )
