@@ -1,3 +1,4 @@
+import Taro from '@tarojs/taro';
 import { create } from 'zustand';
 import { request } from '../services/api';
 
@@ -26,6 +27,7 @@ interface SolveStore {
   isWhyLoading: boolean;
   setQuestion: (q: string) => void;
   solve: (stage: string) => Promise<void>;
+  solveByPhoto: (stage: string) => Promise<void>;
   expandLayer: (layer: 1 | 2 | 3) => void;
   askWhy: (stepIndex: number, stepContent: string) => Promise<void>;
   reset: () => void;
@@ -52,6 +54,43 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
         data: { question, stage, solve_type: 'deep' },
       });
       set({ result, isSolving: false, expandedLayer: 1 });
+    } catch (err: any) {
+      set({ isSolving: false });
+      throw err;
+    }
+  },
+
+  solveByPhoto: async (stage) => {
+    let filePath: string;
+    try {
+      const res = await Taro.chooseImage({
+        count: 1,
+        sizeType: ['compressed'],
+        sourceType: ['camera', 'album'],
+      });
+      filePath = res.tempFilePaths[0];
+    } catch {
+      return; // user cancelled the picker
+    }
+    if (!filePath) return;
+    set({ isSolving: true, result: null });
+    try {
+      const base64 = Taro.getFileSystemManager().readFileSync(filePath, 'base64') as string;
+      const data = await request<{ answer: string }>('/api/solve/vision', {
+        method: 'POST',
+        data: { image_base64: base64, stage },
+      });
+      set({
+        result: {
+          answer: data.answer,
+          steps: [],
+          knowledge_points: [],
+          related_topics: [],
+          common_mistakes: [],
+        },
+        isSolving: false,
+        expandedLayer: 1,
+      });
     } catch (err: any) {
       set({ isSolving: false });
       throw err;

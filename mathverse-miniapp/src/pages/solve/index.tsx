@@ -7,7 +7,7 @@ export default function SolvePage() {
   const {
     question, setQuestion, isSolving, result,
     expandedLayer, expandLayer, askWhy,
-    whyExplanation, solve, reset,
+    whyExplanation, solve, solveByPhoto, reset,
   } = useSolveStore();
   const user = useUserStore((s) => s.user);
   const [error, setError] = useState('');
@@ -18,6 +18,15 @@ export default function SolvePage() {
       await solve(user?.current_stage || 'college');
     } catch (err: any) {
       setError(err.message || '解题失败');
+    }
+  };
+
+  const handlePhoto = async () => {
+    setError('');
+    try {
+      await solveByPhoto(user?.current_stage || 'college');
+    } catch (err: any) {
+      setError(err.message || '拍照解题失败');
     }
   };
 
@@ -40,6 +49,13 @@ export default function SolvePage() {
             loading={isSolving}
           >
             {isSolving ? 'AI思考中...' : '解答'}
+          </Button>
+          <Button
+            style={{ padding: '0 16px', border: '1px solid #4F46E5', color: '#4F46E5', borderRadius: '9999px', backgroundColor: '#fff' }}
+            onClick={handlePhoto}
+            disabled={isSolving}
+          >
+            📷 拍照
           </Button>
           {result && (
             <Button
