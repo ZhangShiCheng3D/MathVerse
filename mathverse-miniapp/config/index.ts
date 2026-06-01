@@ -16,7 +16,14 @@ export default defineConfig({
     '@tarojs/plugin-platform-weapp',
     '@tarojs/plugin-platform-h5',
   ],
-  defineConstants: {},
+  // Replace process.env.TARO_APP_API_URL at build time — the mini program runtime
+  // has no `process`, so a surviving reference crashes app.js. Override per build
+  // by setting TARO_APP_API_URL in the environment.
+  defineConstants: {
+    'process.env.TARO_APP_API_URL': JSON.stringify(
+      process.env.TARO_APP_API_URL || 'https://kuangyebar.cn',
+    ),
+  },
   copy: {
     patterns: [],
     options: {},
