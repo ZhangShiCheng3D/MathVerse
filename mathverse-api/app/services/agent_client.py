@@ -164,12 +164,12 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
         return data["answer"]
 
-    # TODO(integration): chat_with_template / generate_quiz still target legacy REST paths.
-    # Migrate to DeepTutor WS — lecture via chat WS (mode=chat), quiz via /api/v1/question/generate.
+    # TODO(integration): generate_quiz still targets a legacy REST path.
+    # Migrate to DeepTutor WS — quiz via /api/v1/question/generate.
     # Pending confirmation of the question/* event schema; see design optimization doc.
 
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
-        """Call Chat endpoint with a custom prompt template."""
+        """Generate prose via DeepTutor chat WS (mode=chat), with a prompt template as system preamble."""
         template_dir = os.path.join(os.path.dirname(__file__), "../../prompts")
         template_full_path = os.path.join(template_dir, template_path)
         if os.path.exists(template_full_path):
@@ -179,12 +179,11 @@ class AgentClient:
             logger.warning("Prompt template missing: %s — sending empty system prompt", template_full_path)
             template = ""
 
-        data = await self._post("/api/chat", {
-            "message": message,
-            "system_prompt": template,
-            "context": {"stage": stage},
-        }, timeout=60.0)
-        return data.get("response", "")
+        # WS chat has no separate system_prompt field — fold the template in as a preamble.
+        preamble = f"{template}\n\n" if template else ""
+        full_message = f"{preamble}（学段：{stage}）\n\n{message}"
+        data = await self._guarded(deeptutor_ws.chat(full_message, mode="chat", timeout=90.0))
+        return data["answer"]
 
     async def generate_quiz(self, kp_id: str, count: int = 5) -> list[dict]:
         """Generate quiz questions for a knowledge point."""

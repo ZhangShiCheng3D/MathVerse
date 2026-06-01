@@ -58,6 +58,19 @@ async def test_quick_solve_success():
 
 
 @pytest.mark.asyncio
+async def test_generate_lecture_uses_chat_ws():
+    """Regression: lecture must go through the chat WS (mode=chat), not the dead HTTP /api/chat."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "导数讲解……", "session_id": None, "statuses": []}
+        result = await client.generate_lecture("导数", "college")
+        assert result == "导数讲解……"
+        assert mock_chat.call_args.kwargs["mode"] == "chat"
+        # kp name is carried into the WS message
+        assert "导数" in mock_chat.call_args.args[0]
+
+
+@pytest.mark.asyncio
 async def test_circuit_breaker_opens():
     client = AgentClient("http://mock:8001")
     client.circuit.failure_threshold = 2
