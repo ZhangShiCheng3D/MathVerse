@@ -71,14 +71,16 @@ async def generate_lecture(req: LectureRequest, user: User | None = Depends(get_
 
 class ExerciseRequest(BaseModel):
     kp_id: str
+    kp_name: str
     count: int = 5
+    stage: str = "college"
 
 
 @router.post("/exercise/generate")
 async def generate_exercise(req: ExerciseRequest, user: User | None = Depends(get_optional_user)):
     """Generate practice exercises for a knowledge point."""
     try:
-        questions = await agent_client.generate_quiz(req.kp_id, req.count)
+        questions = await agent_client.generate_quiz(req.kp_name, req.count, req.stage)
     except AgentUnavailableError as e:
         raise HTTPException(status_code=503, detail=f"出题服务暂时不可用: {e}")
     return {"kp_id": req.kp_id, "questions": questions}

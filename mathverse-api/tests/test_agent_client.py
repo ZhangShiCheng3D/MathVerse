@@ -71,6 +71,27 @@ async def test_generate_lecture_uses_chat_ws():
 
 
 @pytest.mark.asyncio
+async def test_generate_quiz_uses_chat_ws_and_parses_json():
+    """Regression: quiz goes through chat WS (mode=quiz), parsing the JSON question block."""
+    client = AgentClient("http://mock:8001")
+    blob = '前言\n```json\n{"questions":[{"type":"solve","question":"求导","answer":"1"}]}\n```'
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": blob, "session_id": None, "statuses": []}
+        questions = await client.generate_quiz("导数", 3, "college")
+        assert mock_chat.call_args.kwargs["mode"] == "quiz"
+        assert questions == [{"type": "solve", "question": "求导", "answer": "1"}]
+
+
+@pytest.mark.asyncio
+async def test_generate_quiz_degrades_to_empty_on_prose():
+    """No JSON block -> empty list, never a crash."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "纯文字没有结构", "session_id": None, "statuses": []}
+        assert await client.generate_quiz("导数", 3, "college") == []
+
+
+@pytest.mark.asyncio
 async def test_circuit_breaker_opens():
     client = AgentClient("http://mock:8001")
     client.circuit.failure_threshold = 2

@@ -1,8 +1,7 @@
 """Client for the DeepTutor backend.
 
-Heavy solve/chat calls go over DeepTutor's real WebSocket API (see deeptutor_ws);
-the circuit breaker wraps those. Legacy REST helpers (_post) remain only for the
-not-yet-migrated quiz/lecture paths — see the TODO on those methods.
+All solve/chat/quiz/lecture calls go over DeepTutor's real WebSocket API
+(see deeptutor_ws); the circuit breaker wraps those.
 """
 import asyncio
 import json
@@ -11,7 +10,6 @@ import re
 import time
 import os
 from dataclasses import dataclass
-import httpx
 import websockets
 from app.config import settings
 from app.services import deeptutor_ws
@@ -24,6 +22,15 @@ _SOLVE_SCHEMA_HINT = (
     "解答完成后，请在最后附一个 JSON 代码块（```json ... ```），严格使用如下结构：\n"
     '{"answer":"最终答案","steps":[{"title":"步骤标题","content":"步骤说明","why":"为什么这样做"}],'
     '"knowledge_points":["知识点"],"related_topics":["相关题型"],"common_mistakes":["常见错误"]}'
+)
+
+# Ask the engine to append a structured JSON block of quiz questions so we can
+# rebuild a question list from a prose chat stream.
+_QUIZ_SCHEMA_HINT = (
+    "出题完成后，请在最后附一个 JSON 代码块（```json ... ```），严格使用如下结构：\n"
+    '{"questions":[{"type":"choice|fill|solve","question":"题干",'
+    '"options":["A. ...","B. ..."],"answer":"参考答案","analysis":"解析"}]}\n'
+    "（choice 才需要 options，fill/solve 可省略 options）"
 )
 
 
@@ -108,27 +115,6 @@ class AgentClient:
             self.circuit.record_failure()
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
 
-    async def _post(self, path: str, json: dict, timeout: float = 60.0) -> dict:
-        if not self.circuit.can_try():
-            raise AgentUnavailableError("DeepTutor circuit breaker open")
-
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
-                    resp = await client.post(
-                        f"{self.base_url}{path}",
-                        json=json,
-                    )
-                    resp.raise_for_status()
-                    self.circuit.record_success()
-                    return resp.json()
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as e:
-                if attempt == 2:
-                    self.circuit.record_failure()
-                    raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
-                await asyncio.sleep(2 ** attempt)
-        raise AgentUnavailableError("DeepTutor max retries exceeded")
-
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
 
@@ -164,10 +150,6 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
         return data["answer"]
 
-    # TODO(integration): generate_quiz still targets a legacy REST path.
-    # Migrate to DeepTutor WS — quiz via /api/v1/question/generate.
-    # Pending confirmation of the question/* event schema; see design optimization doc.
-
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
         """Generate prose via DeepTutor chat WS (mode=chat), with a prompt template as system preamble."""
         template_dir = os.path.join(os.path.dirname(__file__), "../../prompts")
@@ -185,15 +167,20 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(full_message, mode="chat", timeout=90.0))
         return data["answer"]
 
-    async def generate_quiz(self, kp_id: str, count: int = 5) -> list[dict]:
-        """Generate quiz questions for a knowledge point."""
-        data = await self._post("/api/agent/generate-quiz", {
-            "knowledge_point_id": kp_id,
-            "count": count,
-            "types": ["choice", "fill", "solve"],
-            "language": "zh-CN",
-        }, timeout=90.0)
-        return data.get("questions", [])
+    async def generate_quiz(self, kp_name: str, count: int = 5, stage: str = "college") -> list[dict]:
+        """Generate quiz questions via DeepTutor chat WS (mode=quiz).
+
+        Prompts the engine to append a structured JSON block, then parses the
+        question list. Degrades to an empty list when no JSON block is present.
+        """
+        message = (
+            f"请围绕知识点「{kp_name}」（学段：{stage}）出 {count} 道练习题，覆盖选择/填空/解答题型。\n"
+            f"{_QUIZ_SCHEMA_HINT}"
+        )
+        data = await self._guarded(deeptutor_ws.chat(message, mode="quiz", timeout=90.0))
+        parsed = _extract_json(data["answer"])
+        questions = parsed.get("questions") if parsed else None
+        return questions if isinstance(questions, list) else []
 
     async def generate_lecture(self, kp_name: str, stage: str) -> str:
         """Generate lecture text for a knowledge point."""
