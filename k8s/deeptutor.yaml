@@ -1,0 +1,141 @@
+# DeepTutor — two deployments off the SAME patched image, distinguished by
+# DEEPTUTOR_ROLE so the persistent TutorBots start exactly once (P2 gating):
+#   - deeptutor-web : N stateless replicas serving the API/WS. WEB_CONCURRENCY>1
+#                     is safe now (P1 shared Postgres state + P3a de-affinity).
+#   - deeptutor-bot : exactly 1 replica that owns TutorBot auto-start.
+#
+# State lives in Postgres (P1), so the pod's data dir is just config + scratch:
+# an emptyDir seeded with model_catalog.json (pointing at the gateway) by an
+# initContainer. The init also substitutes the gateway master key into the file.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deeptutor
+spec:
+  selector:
+    app: deeptutor
+    role: web
+  ports:
+    - port: 8001
+      targetPort: 8001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deeptutor-web
+spec:
+  replicas: 3                     # scale out; HPA in edge.yaml drives this
+  selector:
+    matchLabels:
+      app: deeptutor
+      role: web
+  template:
+    metadata:
+      labels:
+        app: deeptutor
+        role: web
+    spec:
+      initContainers:
+        - name: seed-settings
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              mkdir -p /data/user/settings &&
+              sed "s/__LITELLM_MASTER_KEY__/$LITELLM_MASTER_KEY/g"
+              /seed/model_catalog.json > /data/user/settings/model_catalog.json
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: app-secrets, key: LITELLM_MASTER_KEY } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: seed, mountPath: /seed, readOnly: true }
+      containers:
+        - name: deeptutor
+          image: deeptutor-patched        # pinned by kustomization images:
+          ports:
+            - containerPort: 8001
+          env:
+            - name: BACKEND_PORT
+              value: "8001"
+            - name: WEB_CONCURRENCY        # multi-worker — safe with P1 + P3a
+              value: "4"
+            - name: DEEPTUTOR_ROLE
+              value: "web"                 # no TutorBot auto-start on web replicas
+            - name: DEEPTUTOR_PG_DSN
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DEEPTUTOR_PG_DSN } }
+            - name: ENABLE_AUTH
+              value: "false"               # internal-only; edge is mathverse-api
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+          readinessProbe:
+            httpGet: { path: /, port: 8001 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "500m", memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }   # tune to in-flight turns/worker
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: seed
+          configMap:
+            name: deeptutor-model-catalog
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deeptutor-bot
+spec:
+  replicas: 1                     # exactly one — owns TutorBot auto-start
+  selector:
+    matchLabels:
+      app: deeptutor
+      role: bot
+  template:
+    metadata:
+      labels:
+        app: deeptutor
+        role: bot
+    spec:
+      initContainers:
+        - name: seed-settings
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              mkdir -p /data/user/settings &&
+              sed "s/__LITELLM_MASTER_KEY__/$LITELLM_MASTER_KEY/g"
+              /seed/model_catalog.json > /data/user/settings/model_catalog.json
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom: { secretKeyRef: { name: app-secrets, key: LITELLM_MASTER_KEY } }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: seed, mountPath: /seed, readOnly: true }
+      containers:
+        - name: deeptutor
+          image: deeptutor-patched
+          env:
+            - name: BACKEND_PORT
+              value: "8001"
+            - name: WEB_CONCURRENCY
+              value: "1"                   # bot replica isn't the API workhorse
+            - name: DEEPTUTOR_ROLE
+              value: "bot"
+            - name: DEEPTUTOR_PG_DSN
+              valueFrom: { secretKeyRef: { name: app-secrets, key: DEEPTUTOR_PG_DSN } }
+            - name: ENABLE_AUTH
+              value: "false"
+          volumeMounts:
+            - { name: data, mountPath: /app/data }
+          resources:
+            requests: { cpu: "250m", memory: 512Mi }
+            limits: { cpu: "1", memory: 2Gi }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: seed
+          configMap:
+            name: deeptutor-model-catalog
