@@ -100,12 +100,29 @@ class AgentClient:
     def __init__(self, base_url: str | None = None):
         self.base_url = base_url or settings.deeptutor_url
         self.circuit = CircuitBreaker()
+        # Admission gate: bound concurrent in-flight DeepTutor calls so a surge
+        # can't pile unbounded load on the engine (which would blow its tail
+        # latency and trip its own rate limits).
+        self._inflight = asyncio.Semaphore(settings.deeptutor_max_concurrency)
+        self._admission_timeout = settings.deeptutor_admission_timeout
 
     async def _guarded(self, awaitable):
-        """Run a DeepTutor call under the circuit breaker, mapping failures to 503."""
+        """Run a DeepTutor call under the circuit breaker + admission gate.
+
+        Failures map to AgentUnavailableError (routes degrade to DeepSeek). When
+        the in-flight gate is saturated past the admission timeout we also raise
+        AgentUnavailableError — but WITHOUT recording a circuit failure, since
+        that's our own backpressure shedding load onto the degrade path, not a
+        DeepTutor fault.
+        """
         if not self.circuit.can_try():
             awaitable.close()
             raise AgentUnavailableError("DeepTutor circuit breaker open")
+        try:
+            await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
+        except asyncio.TimeoutError:
+            awaitable.close()
+            raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
         try:
             result = await awaitable
             self.circuit.record_success()
@@ -114,6 +131,8 @@ class AgentClient:
                 websockets.WebSocketException) as e:
             self.circuit.record_failure()
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
+        finally:
+            self._inflight.release()
 
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
