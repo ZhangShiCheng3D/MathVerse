@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     deeptutor_url: str = "http://deeptutor:8001"
     deepseek_api_key: str = ""
     qwen_api_key: str = ""
+    # DashScope (Alibaba) — multimodal vision for photo-solving (qwen-vl).
+    dashscope_api_key: str = ""
+    vision_model: str = "qwen-vl-max"
     math_ocr_api_key: str = ""
     wechat_app_id: str = ""
     wechat_app_secret: str = ""

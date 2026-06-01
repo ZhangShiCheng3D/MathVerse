@@ -10,6 +10,7 @@ from app.services.agent_client import agent_client, AgentUnavailableError
 from app.services.quota import enforce_solve_quota, touch_activity
 from app.services.analytics import log_event
 from app.services.deepseek import chat as _deepseek_chat
+from app.services import vision
 from app.database import get_db
 
 router = APIRouter(prefix="/api/solve", tags=["solve"])
@@ -139,14 +140,11 @@ async def vision_solve(
     user: User | None = Depends(get_optional_user),
     db: Session = Depends(get_db),
 ):
-    """Photo solve via DeepTutor vision WS. No DeepSeek fallback (it isn't multimodal)."""
+    """Photo solve via direct DashScope qwen-vl (bypasses DeepTutor's vision agent)."""
     if user:
         enforce_solve_quota(user, db)
 
-    try:
-        answer = await agent_client.vision_solve(req.question, req.image_base64)
-    except AgentUnavailableError:
-        raise HTTPException(status_code=503, detail="拍照解题服务暂时不可用，请稍后再试")
+    answer = await vision.solve(req.question, req.image_base64)
 
     if user:
         _archive_solve(db, user, "[拍照题目]", req.stage, "vision", {"answer": answer}, None)
