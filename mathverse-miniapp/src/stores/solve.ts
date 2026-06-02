@@ -64,7 +64,6 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
 
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      let task: any;
 
       // Transport failure → transparently fall back to the POST path.
       const fallback = () => {
@@ -74,46 +73,55 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
         get().solve(stage).then(resolve).catch(reject);
       };
 
-      try {
-        task = Taro.connectSocket({ url: wsUrl });
-      } catch {
-        fallback();
-        return;
-      }
-
-      task.onOpen(() => task.send({ data: JSON.stringify({ question, stage, token }) }));
-
-      task.onMessage((res: any) => {
-        let ev: any;
-        try { ev = JSON.parse(res.data); } catch { return; }
-        if (ev.type === 'chunk') {
-          set((s) => ({ streamingText: s.streamingText + (ev.content || '') }));
-        } else if (ev.type === 'result') {
-          settled = true;
-          set({
-            result: {
-              answer: ev.answer,
-              steps: ev.steps || [],
-              knowledge_points: ev.knowledge_points || [],
-              related_topics: ev.related_topics || [],
-              common_mistakes: ev.common_mistakes || [],
-            },
-            isSolving: false,
-            isStreaming: false,
-            expandedLayer: 1,
-          });
-          try { task.close(); } catch { /* already closed */ }
-          resolve();
-        } else if (ev.type === 'error') {
-          settled = true;
-          set({ isSolving: false, isStreaming: false });
-          try { task.close(); } catch { /* already closed */ }
-          reject(new Error(ev.message || '解题失败'));
+      (async () => {
+        let task: any;
+        try {
+          // h5 returns a Promise<SocketTask>; weapp returns a SocketTask directly.
+          task = Taro.connectSocket({ url: wsUrl });
+          if (task && typeof task.then === 'function') task = await task;
+        } catch {
+          fallback();
+          return;
         }
-      });
+        if (!task || typeof task.onMessage !== 'function') {
+          fallback();
+          return;
+        }
 
-      task.onError(() => fallback());
-      task.onClose(() => { if (!settled) fallback(); });
+        task.onOpen(() => task.send({ data: JSON.stringify({ question, stage, token }) }));
+
+        task.onMessage((res: any) => {
+          let ev: any;
+          try { ev = JSON.parse(res.data); } catch { return; }
+          if (ev.type === 'chunk') {
+            set((s) => ({ streamingText: s.streamingText + (ev.content || '') }));
+          } else if (ev.type === 'result') {
+            settled = true;
+            set({
+              result: {
+                answer: ev.answer,
+                steps: ev.steps || [],
+                knowledge_points: ev.knowledge_points || [],
+                related_topics: ev.related_topics || [],
+                common_mistakes: ev.common_mistakes || [],
+              },
+              isSolving: false,
+              isStreaming: false,
+              expandedLayer: 1,
+            });
+            try { task.close(); } catch { /* already closed */ }
+            resolve();
+          } else if (ev.type === 'error') {
+            settled = true;
+            set({ isSolving: false, isStreaming: false });
+            try { task.close(); } catch { /* already closed */ }
+            reject(new Error(ev.message || '解题失败'));
+          }
+        });
+
+        task.onError(() => fallback());
+        task.onClose(() => { if (!settled) fallback(); });
+      })();
     });
   },
 
