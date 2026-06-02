@@ -20,6 +20,7 @@ interface UserStore {
   sendSmsCode: (phone: string) => Promise<{ debugCode?: string }>;
   loginByPhone: (phone: string, code: string) => Promise<void>;
   fetchUser: () => Promise<void>;
+  updateProfile: (data: { current_stage?: string; exam_mode?: string | null; nickname?: string }) => Promise<void>;
   switchStage: (stage: string) => void;
 }
 
@@ -79,6 +80,11 @@ export const useUserStore = create<UserStore>((set) => ({
     } catch {
       set({ isLoading: false });
     }
+  },
+
+  updateProfile: async (data) => {
+    const updated = await request<UserInfo>('/api/me/profile', { method: 'PATCH', data });
+    set({ user: updated });
   },
 
   switchStage: (stage: string) => {

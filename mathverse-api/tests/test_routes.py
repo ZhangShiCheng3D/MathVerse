@@ -78,6 +78,23 @@ def test_kg_cache_not_polluted_by_user(auth):
     assert "mastery" not in anon["subjects"][0]["chapters"][0]["topics"][0]
 
 
+def test_update_profile(auth):
+    _, headers = auth
+    resp = client.patch("/api/me/profile", headers=headers,
+                        json={"current_stage": "senior", "exam_mode": "math-2", "nickname": "小明"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["current_stage"] == "senior"
+    assert body["exam_mode"] == "math-2"
+    assert body["nickname"] == "小明"
+
+
+def test_update_profile_rejects_bad_stage(auth):
+    _, headers = auth
+    assert client.patch("/api/me/profile", headers=headers,
+                        json={"current_stage": "phd"}).status_code == 400
+
+
 # ─── questions ───
 
 def test_save_and_fetch_question(auth):

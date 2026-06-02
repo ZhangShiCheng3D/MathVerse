@@ -4,6 +4,11 @@ import Taro from '@tarojs/taro';
 import { request } from '../../services/api';
 import { useUserStore } from '../../stores/user';
 
+const STAGE_LABEL: Record<string, string> = {
+  'primary-low': '小学低段', 'primary-high': '小学高段', junior: '初中',
+  senior: '高中', college: '大学', kaoyan: '考研',
+};
+
 interface ProgressData {
   total_questions: number;
   questions_attempted: number;
@@ -61,15 +66,17 @@ export default function MePage() {
 
   return (
     <ScrollView style={{ minHeight: '100vh', backgroundColor: '#f3f4f6' }}>
-      {/* User Header */}
-      <View style={{
-        backgroundColor: '#4F46E5',
-        color: '#fff',
-        padding: '24px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-      }}>
+      {/* User Header — tap to open learning settings */}
+      <View
+        onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}
+        style={{
+          backgroundColor: '#4F46E5',
+          color: '#fff',
+          padding: '24px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
         <View style={{
           width: '64px',
           height: '64px',
@@ -83,12 +90,13 @@ export default function MePage() {
             {user.nickname[0]}
           </Text>
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={{ fontSize: '18px', fontWeight: 'bold' }}>{user.nickname}</Text>
           <Text style={{ display: 'block', color: '#c7d2fe', fontSize: '14px' }}>
-            {user.tier === 'free' ? '免费版' : user.tier} · 🔥 连续 {user.streak_days} 天
+            {STAGE_LABEL[user.current_stage] || '未设置学段'} · {user.tier === 'free' ? '免费版' : user.tier} · 🔥 {user.streak_days} 天
           </Text>
         </View>
+        <Text style={{ color: '#c7d2fe', fontSize: '14px' }}>设置 ›</Text>
       </View>
 
       {/* Stats */}
