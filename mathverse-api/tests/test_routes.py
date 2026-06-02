@@ -54,6 +54,20 @@ def test_kg_stages_are_distinct():
         assert kg["subjects"][0]["id"].startswith(prefix)
 
 
+def test_radar_uses_stage_subjects(auth):
+    # Radar groups by the user's current stage's subjects, not hardcoded kaoyan.
+    uid, headers = auth
+    db = SessionLocal()
+    db.query(User).filter(User.id == uid).update({"current_stage": "senior"})
+    db.add(LearningProgress(user_id=uid, knowledge_point_id="sr-alg-2.1", mastery_level=0.8))
+    db.commit()
+    db.close()
+    radar = client.get("/api/me/progress/radar", headers=headers).json()
+    assert "函数与代数" in radar["categories"]
+    idx = radar["categories"].index("函数与代数")
+    assert radar["values"][idx] > 0
+
+
 def test_kg_cache_not_polluted_by_user(auth):
     _, headers = auth
     # Authenticated request injects mastery (into a copy)...

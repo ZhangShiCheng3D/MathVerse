@@ -1,7 +1,6 @@
 """学习 API routes — knowledge graph, lectures, exercises."""
 import copy
 import json
-import os
 import re
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -10,24 +9,12 @@ from app.middleware.auth_middleware import get_optional_user, get_current_user
 from app.models.all import User, LearningProgress
 from app.services.agent_client import agent_client, AgentUnavailableError
 from app.services import deepseek
+from app.services.kg import load_kg
 from app.services.progress import record_attempt
 from app.services.analytics import log_event
 from app.database import get_db
 
 router = APIRouter(prefix="/api/learn", tags=["learn"])
-
-KG_DIR = os.path.join(os.path.dirname(__file__), "../../knowledge-graph")
-_kg_cache: dict[str, dict] = {}
-
-
-def _load_kg(stage: str) -> dict:
-    if stage not in _kg_cache:
-        path = os.path.join(KG_DIR, f"{stage}.json")
-        if not os.path.exists(path):
-            path = os.path.join(KG_DIR, "kaoyan-college.json")
-        with open(path, encoding="utf-8") as f:
-            _kg_cache[stage] = json.load(f)
-    return _kg_cache[stage]
 
 
 @router.get("/kg/{stage}")
@@ -37,7 +24,7 @@ async def get_knowledge_graph(
     db: Session = Depends(get_db),
 ):
     """Get knowledge graph for a stage, with user mastery data."""
-    kg = _load_kg(stage)
+    kg = load_kg(stage)
 
     # Inject user mastery data if available. Deep-copy first so the per-user
     # mastery never mutates the shared cache (else a logged-out request would
