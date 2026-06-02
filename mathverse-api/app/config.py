@@ -27,6 +27,19 @@ class Settings(BaseSettings):
     wechat_app_secret: str = ""
     wechat_pay_mch_id: str = ""
     wechat_pay_api_key: str = ""
+    # Phone + SMS login. Disabled → dev mode: the code is returned in the
+    # send response so the flow is testable without a provider (mirrors the
+    # deferred-WeChat-keys pattern). Enable + fill provider creds for real send.
+    sms_enabled: bool = False
+    sms_provider: str = "tencent"  # tencent | aliyun
+    tencent_sms_secret_id: str = ""
+    tencent_sms_secret_key: str = ""
+    tencent_sms_sdk_app_id: str = ""
+    tencent_sms_sign: str = ""
+    tencent_sms_template_id: str = ""  # template must take a single {1} = the code
+    tencent_sms_region: str = "ap-guangzhou"
+    sms_code_ttl_seconds: int = 300
+    sms_resend_interval: int = 60
     free_daily_quota: int = 10
     sensitive_words: str = ""  # comma-separated; operationally configured per deploy
     class Config:

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数界 MathVerse · 安卓 App 设计稿（Capacitor 包 H5 + 手机号短信登录）</title>
+<style>
+  :root{--indigo:#4F46E5;--indigo-50:#eef2ff;--indigo-100:#e0e7ff;--indigo-700:#4338ca;--ink:#111827;--gray:#6b7280;--gray-light:#9ca3af;--line:#e5e7eb;--bg:#f3f4f6;--green-bg:#f0fdf4;--green:#166534;--red:#dc2626;--red-bg:#fef2f2;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:#fafafe;line-height:1.6}
+  .wrap{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:27px;font-weight:800;color:var(--indigo);margin-bottom:6px}
+  .sub{color:var(--gray);margin-bottom:8px}
+  .meta{font-size:13px;color:var(--gray-light);margin-bottom:30px}
+  h2{font-size:20px;margin:42px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--indigo-100);color:var(--indigo-700)}
+  h3{font-size:16px;margin:20px 0 9px}
+  p,li{font-size:14.5px;color:#374151}
+  ul,ol{padding-left:22px;margin:8px 0}
+  li{margin:4px 0}
+  code{background:#f1f1fb;color:var(--indigo-700);padding:1px 6px;border-radius:5px;font-family:"SF Mono",Consolas,monospace;font-size:13px}
+  pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:10px;overflow-x:auto;margin:12px 0;font-size:12.5px;line-height:1.55}
+  pre code{background:none;color:inherit;padding:0}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--indigo-50);color:var(--indigo-700);font-weight:600}
+  .note{background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .ok{background:var(--green-bg);border-left:4px solid #22c55e;padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .danger{background:var(--red-bg);border-left:4px solid var(--red);padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .diagram{background:#0f172a;color:#e2e8f0;padding:18px;border-radius:10px;font-family:Consolas,monospace;font-size:12.5px;line-height:1.7;white-space:pre;overflow-x:auto;margin:12px 0}
+  .phone{width:280px;border:10px solid #1f2937;border-radius:30px;overflow:hidden;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14);margin:10px 0}
+  .nav{background:var(--indigo);color:#fff;padding:11px 14px;font-size:14px;font-weight:600}
+  .screen{padding:18px;min-height:380px;background:#fff}
+  .inp{border:1px solid var(--line);border-radius:10px;padding:11px;font-size:14px;color:#9ca3af;margin-bottom:10px}
+  .btn{background:var(--indigo);color:#fff;border-radius:9999px;padding:11px;text-align:center;font-size:14px;font-weight:600}
+  .small{font-size:11.5px;color:var(--gray-light)}
+  .flow{counter-reset:s;list-style:none;padding:0}
+  .flow li{position:relative;padding:8px 0 8px 34px;border-left:2px solid var(--indigo-100);margin-left:10px}
+  .flow li::before{counter-increment:s;content:counter(s);position:absolute;left:-13px;top:7px;width:24px;height:24px;background:var(--indigo);color:#fff;border-radius:50%;text-align:center;font-size:12px;line-height:24px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:9999px;font-size:11px;background:var(--indigo-100);color:var(--indigo-700);margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>数界 MathVerse · 安卓 App 设计稿</h1>
+<p class="sub">技术路线：<b>Capacitor 包 H5</b>（1 套 Taro 代码出安卓 APK）· 登录：<b>手机号 + 短信验证码</b>（独立于微信）</p>
+<p class="meta">2026-06-02 · 已确认决策 · 本机具备完整 Android SDK（C:\Android：build-tools 33-36 / platforms 34-36 / NDK / JDK 17·21）→ 本地直接出 APK</p>
+
+<div class="ok"><b>为什么是 Capacitor 包 H5</b>：现有 Taro 工程已配 <code>build:h5</code> 目标，样式几乎全是内联 <code>style</code>（高度可移植），<b>复用 100% 现有 UI 与业务逻辑</b>，5+ 个页面立即可用。代价是 WebView 底（非原生控件）——对这类"读题/讲解/列表"内容型应用足够。其余三条路线（Taro-RN / 原生 Kotlin / Expo）都要重写 UI 或大量适配，违背"最少代码解决问题"。</div>
+
+<h2>0 · 整体架构</h2>
+<div class="diagram">┌─────────────────── Android APK (Capacitor) ───────────────────┐
+│  WebView (androidScheme: https://localhost)                   │
+│   └─ Taro build:h5 产物 (dist/)  ── 现有 5+ 页面，零改        │
+│        └─ Taro.request ──┐                                    │
+│                          │  CapacitorHttp 插件拦截            │
+│                          ▼  改走【原生 HTTP】→ 绕过浏览器 CORS │
+└──────────────────────────┼────────────────────────────────────┘
+                           │  https://kuangyebar.cn
+                           ▼
+                 mathverse-api (FastAPI)
+                   ├─ 现有 /api/solve /learn /me /pay …（不变）
+                   └─ 新增 /api/auth/sms/send · /verify（手机登录）
+                           │
+                           ▼  SMS 服务商（腾讯云/阿里云，凭证待配）
+                      未配 → dev 模式：验证码直接回传，现在即可测</div>
+
+<div class="note"><b>CORS 决策</b>：Capacitor 启用内置 <code>CapacitorHttp</code> 插件后，WebView 里的 <code>fetch/XHR</code>（即 Taro.request 在 h5 的底层）被改写为<b>原生 HTTP 请求</b>，不经过浏览器同源策略 → <b>后端 CORS 配置零改动</b>。比往生产 <code>.env</code> 的 <code>cors_origins</code> 加 <code>https://localhost</code> 白名单更干净、更不易踩坑。</div>
+
+<h2>1 · 后端：手机号短信登录</h2>
+<div class="ok"><b>零改表</b>：<code>User</code> 模型<b>已有 <code>phone</code> 字段</b>（<code>phone = Column(String, nullable=True)</code>）。OTP 用<b>新表 <code>SmsCode</code></b>，<code>init_db</code> 启动时 <code>create_all</code> 自动建（只建缺失表，不动现有数据，部署安全）。</div>
+
+<h3>1.1 新增 ORM 模型 <span class="pill">models/all.py</span></h3>
+<pre><code>class SmsCode(Base):
+    __tablename__ = "sms_codes"
+    id = Column(String, primary_key=True, default=_new_id)
+    phone = Column(String, nullable=False, index=True)
+    code = Column(String, nullable=False)          # 6 位数字
+    expires_at = Column(DateTime, nullable=False)  # now + 5 min
+    consumed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)</code></pre>
+
+<h3>1.2 服务 <span class="pill">services/sms.py</span></h3>
+<ul>
+<li><code>generate_and_store(db, phone) -> code</code>：生成 6 位码，写 <code>SmsCode</code>，调 <code>_provider_send(phone, code)</code>。</li>
+<li><code>verify(db, phone, code) -> bool</code>：取该手机<b>未消费、未过期</b>的最新码比对；成功标记 <code>consumed=True</code>。</li>
+<li><code>_provider_send</code>：<code>sms_enabled=True</code> → <code>_send_tencent</code>（<b>腾讯云短信 SDK，已实现</b>，懒加载，凭证从 env）；否则 <b>no-op + 日志</b>（dev 模式）。发送失败抛 <code>RuntimeError</code> → 路由返回 502。</li>
+</ul>
+
+<h3>1.3 配置 <span class="pill">config.py</span></h3>
+<pre><code>sms_enabled: bool = False          # 未启用 → dev 模式（验证码回传，便于测试）
+sms_provider: str = "tencent"      # tencent | aliyun
+tencent_sms_secret_id: str = ""
+tencent_sms_secret_key: str = ""
+tencent_sms_sdk_app_id: str = ""
+tencent_sms_sign: str = ""
+tencent_sms_template_id: str = ""  # 模板取单参 {1} = 验证码
+tencent_sms_region: str = "ap-guangzhou"
+sms_code_ttl_seconds: int = 300    # 5 分钟
+sms_resend_interval: int = 60      # 同号 60s 限发一次</code></pre>
+
+<h3>1.4 路由 <span class="pill">routes/auth.py</span></h3>
+<table>
+<tr><th>端点</th><th>请求 / 行为</th><th>返回</th></tr>
+<tr><td><code>POST /api/auth/sms/send</code></td><td><code>{phone}</code>。校验号码格式 <code>^1[3-9]\d{9}$</code>；60s 限频（查最近一条码的 <code>created_at</code>）；生成+存+发。</td><td>dev: <code>{sent:true, debug_code:"123456"}</code>；生产: <code>{sent:true}</code></td></tr>
+<tr><td><code>POST /api/auth/sms/verify</code></td><td><code>{phone, code}</code>。校验码；<b>按 phone find-or-create User</b>（新用户 nickname=「用户+尾号」）；发 JWT。</td><td><code>{access_token, refresh_token, user:{…}}</code>（结构同 <code>mp-login</code>）</td></tr>
+</table>
+<div class="note"><b>dev 模式回传验证码</b>仅在 <code>sms_enabled=False</code> 时返回 <code>debug_code</code>，方便现在就把登录流跑通并写测试。配齐短信商凭证（<code>sms_enabled=True</code>）后自动停止回传——与"微信密钥延后"完全同构。</div>
+
+<h3>1.5 测试 <span class="pill">tests/test_auth.py</span></h3>
+<ul>
+<li>非法号码 → 422/400；send 返回 <code>debug_code</code>（dev）。</li>
+<li>verify 正确码 → 200 + 三字段 + 新建 User（同号二次 verify 复用同一 User）。</li>
+<li>错码 / 过期 / 已消费 → 400。</li>
+<li>60s 内重复 send → 429。</li>
+</ul>
+
+<h2>2 · 前端：登录流（Taro，h5/weapp 双端自适应）</h2>
+<h3>2.1 user store <span class="pill">stores/user.ts</span></h3>
+<pre><code>sendSmsCode: (phone) => Promise&lt;{ debugCode?: string }&gt;   // POST /sms/send
+loginByPhone: (phone, code) => Promise&lt;void&gt;              // POST /sms/verify → setTokens + set user</code></pre>
+<p>保留现有 <code>login()</code>（微信，weapp 用）。新增手机登录，互不影响。</p>
+
+<h3>2.2 登录页 <span class="pill">pages/login/index（新）</span></h3>
+<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+  <div class="phone">
+    <div class="nav">‹ 登录</div>
+    <div class="screen">
+      <div style="text-align:center;margin-bottom:18px">
+        <div style="font-size:24px;font-weight:800;color:#4F46E5">数界 MathVerse</div>
+        <div class="small">手机号登录 / 注册</div>
+      </div>
+      <div class="inp">请输入手机号</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div class="inp" style="flex:1;margin:0">6 位验证码</div>
+        <div class="btn" style="padding:11px 14px;white-space:nowrap">获取验证码</div>
+      </div>
+      <div class="btn">登录</div>
+      <div class="small" style="text-align:center;margin-top:14px">未注册手机号将自动创建账号</div>
+    </div>
+  </div>
+  <div style="flex:1;min-width:300px">
+    <h3 style="margin-top:0">交互</h3>
+    <ol class="flow">
+      <li>输入手机号 → 点「获取验证码」→ <code>sendSmsCode</code>；按钮进入 60s 倒计时。</li>
+      <li>dev 模式下把 <code>debugCode</code> 直接 toast 出来（便于自测），生产无此回传。</li>
+      <li>输入验证码 → 点「登录」→ <code>loginByPhone</code> → 成功 <code>navigateBack</code> 或回首页，user 状态更新。</li>
+      <li>失败（错码/过期）→ toast 错误。</li>
+    </ol>
+    <h3>双端自适应登录入口</h3>
+    <p>首页/「我的」原有登录按钮按 <code>process.env.TARO_ENV</code> 分支：</p>
+    <ul>
+      <li><code>weapp</code> → 保留微信一键登录（<code>Taro.login</code>，不变）。</li>
+      <li><code>h5</code>（即安卓 App）→ <code>navigateTo('/pages/login/index')</code> 走手机号登录。</li>
+    </ul>
+    <p>注册新页到 <code>app.config.ts</code>。</p>
+  </div>
+</div>
+
+<h2>3 · Capacitor 安卓壳</h2>
+<h3>3.1 依赖与配置</h3>
+<pre><code>npm i -D @capacitor/cli
+npm i @capacitor/core @capacitor/android
+npx cap init "数界 MathVerse" cn.kuangyebar.mathverse --web-dir dist</code></pre>
+<p><code>capacitor.config.ts</code> 关键项：</p>
+<pre><code>{
+  appId: 'cn.kuangyebar.mathverse',
+  appName: '数界 MathVerse',
+  webDir: 'dist',
+  server: { androidScheme: 'https' },
+  plugins: { CapacitorHttp: { enabled: true } }   // ← 绕过 CORS 的关键
+}</code></pre>
+
+<h3>3.2 出包流程</h3>
+<pre><code># 1. 构建 H5 产物（API 指向生产）
+TARO_APP_API_URL=https://kuangyebar.cn npm run build:h5
+# 2. 生成/同步原生工程
+npx cap add android         # 首次，生成 android/
+npx cap sync android        # 之后每次：把 dist/ 同步进原生工程
+# 3. 出 APK（本机已有 SDK+JDK）
+cd android && ./gradlew assembleDebug
+# 产物：android/app/build/outputs/apk/debug/app-debug.apk</code></pre>
+<p>新增 npm 脚本：<code>"app:sync": "npm run build:h5 && npx cap sync android"</code>。</p>
+<div class="danger"><b>首次 Gradle 构建风险</b>：会联网下载 Gradle 发行版 + Android 依赖，量大且本机代理（198.18.x）历史上偶有超时。若失败，按 runbook 用国内镜像或离线 Gradle 重试——<b>这是环境问题，不是代码问题</b>，不阻塞代码交付。</div>
+
+<h2>4 · 待办（非代码，operator/你本人）</h2>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>短信服务商凭证</td><td>腾讯云短信发送<b>已实现（SDK 集成）</b>，仅需申请签名+模板（单参 {1}=验证码），填 <code>TENCENT_SMS_*</code> env 并置 <code>sms_enabled=true</code>。未配前 dev 模式可全程自测。</td></tr>
+<tr><td>App 图标 / 启动图</td><td>需设计资源；先用 Capacitor 默认占位，后续 <code>cap assets</code> 注入。</td></tr>
+<tr><td>正式签名 / 上架</td><td>release keystore 签名 → 各安卓应用商店。debug APK 可先内部分发安装。</td></tr>
+<tr><td>后端部署</td><td>新增短信端点需在服务器 <code>docker compose up -d --build mathverse-api</code>（你确认后我执行或你执行）。</td></tr>
+</table>
+
+<h2>5 · 实施清单（验证点）</h2>
+<table>
+<tr><th>#</th><th>步骤</th><th>验证</th></tr>
+<tr><td>1</td><td>后端：<code>SmsCode</code> 模型 + <code>config</code> SMS 项 + <code>services/sms.py</code> + <code>auth.py</code> 两端点</td><td>新增 pytest 全绿</td></tr>
+<tr><td>2</td><td>前端：user store 两方法 + <code>pages/login</code> + 登录入口按 env 分支 + 注册路由</td><td><code>build:h5</code> 成功</td></tr>
+<tr><td>3</td><td>Capacitor：安装 + <code>cap init</code> + <code>capacitor.config.ts</code>（CapacitorHttp）+ <code>cap add android</code></td><td><code>android/</code> 工程生成</td></tr>
+<tr><td>4</td><td>出 APK：<code>app:sync</code> + <code>gradlew assembleDebug</code></td><td>生成 <code>app-debug.apk</code>（环境允许的话）</td></tr>
+</table>
+<div class="ok"><b>验收口径</b>：后端 pytest 全绿（含短信端点）；<code>build:h5</code> 成功；<code>android/</code> 工程生成且 <code>cap sync</code> 通过；力争产出可安装的 <code>app-debug.apk</code>（若 Gradle 联网受阻则交付到"工程就绪、一条命令出包"的状态并记录 runbook）。</div>
+
+</div>
+</body>
+</html>

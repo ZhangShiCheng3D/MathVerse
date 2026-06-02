@@ -106,3 +106,82 @@ def test_oauth_state_rejects_garbage():
     from app.routes.auth import _verify_oauth_state
     with pytest.raises(HTTPException):
         _verify_oauth_state("not-a-real-token")
+
+
+# ─── Phone + SMS login ───
+
+def _cleanup_phone(phone):
+    from app.database import SessionLocal
+    from app.models.all import User, SmsCode, AnalyticsEvent
+    db = SessionLocal()
+    user = db.query(User).filter(User.phone == phone).first()
+    if user:
+        db.query(AnalyticsEvent).filter(AnalyticsEvent.user_id == user.id).delete()
+        db.query(User).filter(User.id == user.id).delete()
+    db.query(SmsCode).filter(SmsCode.phone == phone).delete()
+    db.commit()
+    db.close()
+
+
+def test_sms_send_rejects_bad_phone(client):
+    resp = client.post("/api/auth/sms/send", json={"phone": "12345"})
+    assert resp.status_code == 400
+
+
+def test_sms_send_returns_debug_code_in_dev(client):
+    phone = "13900000001"
+    _cleanup_phone(phone)
+    try:
+        resp = client.post("/api/auth/sms/send", json={"phone": phone})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["sent"] is True
+        assert len(body["debug_code"]) == 6 and body["debug_code"].isdigit()
+    finally:
+        _cleanup_phone(phone)
+
+
+def test_sms_verify_creates_user_and_reuses_on_relogin(client, monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "sms_resend_interval", 0)  # allow immediate resend
+    phone = "13900000002"
+    _cleanup_phone(phone)
+    try:
+        code = client.post("/api/auth/sms/send", json={"phone": phone}).json()["debug_code"]
+        resp = client.post("/api/auth/sms/verify", json={"phone": phone, "code": code})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["access_token"] and body["refresh_token"]
+        uid = body["user"]["id"]
+
+        # Re-login with the same phone → same user (find-or-create).
+        code2 = client.post("/api/auth/sms/send", json={"phone": phone}).json()["debug_code"]
+        again = client.post("/api/auth/sms/verify", json={"phone": phone, "code": code2})
+        assert again.status_code == 200
+        assert again.json()["user"]["id"] == uid
+    finally:
+        _cleanup_phone(phone)
+
+
+def test_sms_verify_rejects_wrong_code(client):
+    phone = "13900000003"
+    _cleanup_phone(phone)
+    try:
+        code = client.post("/api/auth/sms/send", json={"phone": phone}).json()["debug_code"]
+        wrong = "111111" if code != "111111" else "222222"
+        resp = client.post("/api/auth/sms/verify", json={"phone": phone, "code": wrong})
+        assert resp.status_code == 400
+    finally:
+        _cleanup_phone(phone)
+
+
+def test_sms_send_rate_limited(client):
+    phone = "13900000004"
+    _cleanup_phone(phone)
+    try:
+        first = client.post("/api/auth/sms/send", json={"phone": phone})
+        assert first.status_code == 200
+        second = client.post("/api/auth/sms/send", json={"phone": phone})
+        assert second.status_code == 429
+    finally:
+        _cleanup_phone(phone)

@@ -2,9 +2,16 @@ import { View, Text, Button } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useUserStore } from '../../stores/user';
 
+const IS_H5 = process.env.TARO_ENV === 'h5';
+
 export default function HomePage() {
   const user = useUserStore((s) => s.user);
   const login = useUserStore((s) => s.login);
+
+  const onLogin = () => {
+    if (IS_H5) Taro.navigateTo({ url: '/pages/login/index' });
+    else login();
+  };
 
   return (
     <View style={{ minHeight: '100vh', backgroundColor: '#fff' }}>
@@ -29,9 +36,9 @@ export default function HomePage() {
               padding: '8px 32px',
               fontWeight: '600',
             }}
-            onClick={login}
+            onClick={onLogin}
           >
-            微信一键登录
+            {IS_H5 ? '手机号一键登录' : '微信一键登录'}
           </Button>
         )}
       </View>

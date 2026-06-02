@@ -17,6 +17,10 @@ interface ProgressData {
 export default function MePage() {
   const user = useUserStore((s) => s.user);
   const login = useUserStore((s) => s.login);
+  const onLogin = () => {
+    if (process.env.TARO_ENV === 'h5') Taro.navigateTo({ url: '/pages/login/index' });
+    else login();
+  };
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [reviewCount, setReviewCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -47,9 +51,9 @@ export default function MePage() {
             color: '#fff',
             borderRadius: '9999px',
           }}
-          onClick={login}
+          onClick={onLogin}
         >
-          微信登录
+          {process.env.TARO_ENV === 'h5' ? '手机号登录' : '微信登录'}
         </Button>
       </View>
     );

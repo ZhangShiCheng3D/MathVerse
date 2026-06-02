@@ -12,10 +12,14 @@
     "build:weapp": "taro build --type weapp",
     "build:h5": "taro build --type h5",
     "dev:weapp": "npm run build:weapp -- --watch",
-    "dev:h5": "npm run build:h5 -- --watch"
+    "dev:h5": "npm run build:h5 -- --watch",
+    "app:sync": "npm run build:h5 && npx cap sync android",
+    "app:apk": "npm run app:sync && cd android && gradlew assembleDebug"
   },
   "dependencies": {
     "@babel/preset-react": "^7.29.7",
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
     "@tarojs/components": "^4.0.0",
     "@tarojs/helper": "^4.0.0",
     "@tarojs/plugin-framework-react": "^4.2.0",
@@ -33,6 +37,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@capacitor/cli": "^8.3.4",
     "@tarojs/cli": "^4.0.0",
     "@types/react": "^18.3.0",
     "typescript": "^5.4.0"

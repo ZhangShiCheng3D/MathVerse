@@ -30,6 +30,15 @@ class User(Base):
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
+class SmsCode(Base):
+    __tablename__ = "sms_codes"
+    id = Column(String, primary_key=True, default=_new_id)
+    phone = Column(String, nullable=False, index=True)
+    code = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)
+
 class MistakeNotebook(Base):
     __tablename__ = "mistake_notebook"
     __table_args__ = (

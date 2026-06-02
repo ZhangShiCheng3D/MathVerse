@@ -17,6 +17,8 @@ interface UserStore {
   isLogin: boolean;
   isLoading: boolean;
   login: () => Promise<void>;
+  sendSmsCode: (phone: string) => Promise<{ debugCode?: string }>;
+  loginByPhone: (phone: string, code: string) => Promise<void>;
   fetchUser: () => Promise<void>;
   switchStage: (stage: string) => void;
 }
@@ -45,6 +47,28 @@ export const useUserStore = create<UserStore>((set) => ({
       console.error('Login failed:', err);
       set({ isLoading: false });
     }
+  },
+
+  sendSmsCode: async (phone) => {
+    const data = await request<{ sent: boolean; debug_code?: string }>(
+      '/api/auth/sms/send',
+      { method: 'POST', data: { phone }, requireAuth: false }
+    );
+    return { debugCode: data.debug_code };
+  },
+
+  loginByPhone: async (phone, code) => {
+    const data = await request<{
+      access_token: string;
+      refresh_token: string;
+      user: UserInfo;
+    }>('/api/auth/sms/verify', {
+      method: 'POST',
+      data: { phone, code },
+      requireAuth: false,
+    });
+    setTokens(data.access_token, data.refresh_token);
+    set({ user: data.user, isLogin: true, isLoading: false });
   },
 
   fetchUser: async () => {

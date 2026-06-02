@@ -9,3 +9,6 @@ pyjwt==2.10.1
 python-jose[cryptography]==3.3.0
 bcrypt==4.2.1
 python-multipart==0.0.19
+# Tencent Cloud SMS — lazy-imported only when SMS_ENABLED=true (phone login).
+# Floor pin (not ==): runtime-only optional dep; avoids breaking install on a stale tag.
+tencentcloud-sdk-python-sms>=3.0.1000
