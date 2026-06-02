@@ -80,7 +80,9 @@ export async function request<T = any>(
     }
 
     if (res.statusCode === 429) {
-      throw new Error('今日免费额度已用完');
+      // Could be the solve quota OR the SMS resend rate-limit — use the
+      // server's own message instead of assuming it's a quota error.
+      throw new Error((res.data as any)?.detail || '操作过于频繁，请稍后再试');
     }
 
     if (res.statusCode >= 400) {
