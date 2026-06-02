@@ -1,0 +1,77 @@
+{
+  "version": "1.0",
+  "stage": "primary-low",
+  "name": "小学低段数学（1-3年级）",
+  "subjects": [
+    {
+      "id": "pl-num",
+      "name": "数与运算",
+      "chapters": [
+        {
+          "id": "pl-num-1",
+          "name": "数的认识",
+          "frequency": "high",
+          "topics": [
+            {"id": "pl-num-1.1", "name": "20以内数的认识", "difficulty": 1},
+            {"id": "pl-num-1.2", "name": "100以内数的认识", "difficulty": 2},
+            {"id": "pl-num-1.3", "name": "万以内数的认识", "difficulty": 2}
+          ]
+        },
+        {
+          "id": "pl-num-2",
+          "name": "加法与减法",
+          "frequency": "high",
+          "topics": [
+            {"id": "pl-num-2.1", "name": "20以内加减法", "difficulty": 1},
+            {"id": "pl-num-2.2", "name": "100以内加减法", "difficulty": 2},
+            {"id": "pl-num-2.3", "name": "三位数加减法", "difficulty": 3}
+          ]
+        },
+        {
+          "id": "pl-num-3",
+          "name": "乘法与除法",
+          "frequency": "high",
+          "topics": [
+            {"id": "pl-num-3.1", "name": "乘法的初步认识", "difficulty": 2},
+            {"id": "pl-num-3.2", "name": "表内乘法（乘法口诀）", "difficulty": 2},
+            {"id": "pl-num-3.3", "name": "表内除法", "difficulty": 3},
+            {"id": "pl-num-3.4", "name": "有余数的除法", "difficulty": 3}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl-geo",
+      "name": "图形与几何",
+      "chapters": [
+        {
+          "id": "pl-geo-1",
+          "name": "认识图形",
+          "frequency": "medium",
+          "topics": [
+            {"id": "pl-geo-1.1", "name": "认识立体图形", "difficulty": 1},
+            {"id": "pl-geo-1.2", "name": "认识平面图形", "difficulty": 1},
+            {"id": "pl-geo-1.3", "name": "周长的认识", "difficulty": 3}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pl-meas",
+      "name": "量与计量",
+      "chapters": [
+        {
+          "id": "pl-meas-1",
+          "name": "常见的量",
+          "frequency": "medium",
+          "topics": [
+            {"id": "pl-meas-1.1", "name": "认识钟表与时间", "difficulty": 2},
+            {"id": "pl-meas-1.2", "name": "长度单位（厘米、米）", "difficulty": 2},
+            {"id": "pl-meas-1.3", "name": "质量单位（克、千克）", "difficulty": 2},
+            {"id": "pl-meas-1.4", "name": "认识人民币", "difficulty": 2}
+          ]
+        }
+      ]
+    }
+  ]
+}

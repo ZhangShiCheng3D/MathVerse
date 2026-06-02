@@ -25,7 +25,11 @@ export default defineConfig({
     ),
   },
   copy: {
-    patterns: [],
+    // tabBar icons are referenced by path in app.config but Taro h5 does not
+    // auto-copy them — copy them into the output so the web/Android build resolves them.
+    patterns: [
+      { from: 'src/assets/tab/', to: 'dist/assets/tab/' },
+    ],
     options: {},
   },
   framework: 'react',
