@@ -268,6 +268,26 @@ async def estimate_exam_score(req: ScoreEstimateRequest, user: User = Depends(ge
     return estimate_score(req.knowledge_points, req.exam_mode)
 
 
+@router.get("/score/estimate")
+async def get_score_estimate(
+    exam_mode: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Estimate the exam score from the user's own mastery in the DB.
+
+    The POST variant needs the client to ship the full per-KP mastery dict,
+    which no GET endpoint exposes. This reads it straight from
+    LearningProgress (like plan/today) so the client carries zero state.
+    """
+    records = db.query(LearningProgress).filter(
+        LearningProgress.user_id == user.id
+    ).all()
+    mastery = {r.knowledge_point_id: r.mastery_level for r in records}
+    mode = exam_mode or user.exam_mode or "math-1"
+    return estimate_score(mastery, mode)
+
+
 # ─── Streak ───
 
 @router.get("/streak")

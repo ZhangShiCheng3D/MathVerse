@@ -4,6 +4,10 @@ export default defineAppConfig({
     'pages/solve/index',
     'pages/learn/index',
     'pages/me/index',
+    'pages/mistakes/index',
+    'pages/plan/index',
+    'pages/score/index',
+    'pages/membership/index',
   ],
   tabBar: {
     color: '#8b8fa6',

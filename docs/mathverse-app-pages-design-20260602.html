@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数界 MathVerse · App 四页设计稿（错题本 / 升级会员 / 今日计划 / 估分预测）</title>
+<style>
+  :root{
+    --indigo:#4F46E5; --indigo-50:#eef2ff; --indigo-100:#e0e7ff; --indigo-700:#4338ca;
+    --ink:#111827; --gray:#6b7280; --gray-light:#9ca3af; --line:#e5e7eb;
+    --bg:#f3f4f6; --green-bg:#f0fdf4; --green:#166534; --red:#dc2626; --red-bg:#fef2f2;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink);background:#fafafe;line-height:1.6}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+  h1{font-size:28px;font-weight:800;color:var(--indigo);margin-bottom:6px}
+  .sub{color:var(--gray);margin-bottom:8px}
+  .meta{font-size:13px;color:var(--gray-light);margin-bottom:32px}
+  h2{font-size:21px;margin:44px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--indigo-100);color:var(--indigo-700)}
+  h3{font-size:16px;margin:22px 0 10px}
+  p,li{font-size:14.5px;color:#374151}
+  ul,ol{padding-left:22px;margin:8px 0}
+  li{margin:4px 0}
+  code{background:#f1f1fb;color:var(--indigo-700);padding:1px 6px;border-radius:5px;font-family:"SF Mono",Consolas,monospace;font-size:13px}
+  table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--indigo-50);color:var(--indigo-700);font-weight:600}
+  .note{background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .ok{background:var(--green-bg);border-left:4px solid #22c55e;padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .danger{background:var(--red-bg);border-left:4px solid var(--red);padding:12px 16px;margin:14px 0;border-radius:0 8px 8px 0;font-size:14px}
+  .mock-row{display:flex;flex-wrap:wrap;gap:28px;margin:18px 0}
+  .phone{width:288px;border:10px solid #1f2937;border-radius:32px;overflow:hidden;background:#fff;box-shadow:0 12px 32px rgba(0,0,0,.14);flex-shrink:0}
+  .nav{background:var(--indigo);color:#fff;padding:11px 14px;display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600}
+  .nav .back{font-size:17px}
+  .screen{height:520px;overflow:hidden;background:#fff;position:relative}
+  .screen.gray{background:var(--bg)}
+  .pad{padding:14px}
+  .chip{display:inline-block;padding:3px 11px;border-radius:9999px;font-size:12px;margin:3px 4px 3px 0}
+  .chip-on{background:var(--indigo);color:#fff}
+  .chip-off{background:#fff;color:var(--gray);border:1px solid var(--line)}
+  .card{border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:11px;background:#fff}
+  .tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:11px;margin-right:5px}
+  .tag-sub{background:var(--indigo-100);color:var(--indigo-700)}
+  .tag-warn{background:var(--red-bg);color:var(--red)}
+  .tag-ok{background:#dcfce7;color:var(--green)}
+  .tag-learn{background:#fef9c3;color:#854d0e}
+  .tag-review{background:#dbeafe;color:#1e40af}
+  .q{font-size:13px;color:#374151;margin:6px 0}
+  .small{font-size:11.5px;color:var(--gray-light)}
+  .btn{display:block;width:100%;text-align:center;background:var(--indigo);color:#fff;border-radius:9999px;padding:9px;font-size:14px;font-weight:600;margin-top:6px}
+  .btn-line{display:block;width:100%;text-align:center;background:#fff;color:var(--indigo);border:1px solid var(--indigo);border-radius:9999px;padding:9px;font-size:14px;margin-top:8px}
+  .rate-row{display:flex;gap:6px;margin-top:8px}
+  .rate{flex:1;text-align:center;font-size:12px;padding:7px 0;border-radius:8px;border:1px solid var(--line);color:#374151}
+  .price-card{border:2px solid var(--line);border-radius:14px;padding:14px;margin-bottom:11px;text-align:center}
+  .price-card.hot{border-color:var(--indigo);background:var(--indigo-50);position:relative}
+  .price-card .amt{font-size:26px;font-weight:800;color:var(--indigo)}
+  .price-card .unit{font-size:12px;color:var(--gray)}
+  .badge-hot{position:absolute;top:-10px;right:14px;background:#f59e0b;color:#fff;font-size:11px;padding:2px 9px;border-radius:9999px}
+  .gauge{width:130px;height:130px;border-radius:50%;margin:10px auto;display:flex;align-items:center;justify-content:center;flex-direction:column;
+    background:conic-gradient(var(--indigo) 0 72%, var(--line) 72% 100%)}
+  .gauge .inner{width:100px;height:100px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-direction:column}
+  .big{font-size:34px;font-weight:800;color:var(--indigo)}
+  .seg{display:flex;border:1px solid var(--indigo);border-radius:9px;overflow:hidden;margin:10px 0}
+  .seg span{flex:1;text-align:center;font-size:13px;padding:7px 0}
+  .seg .on{background:var(--indigo);color:#fff}
+  .seg .off{color:var(--indigo)}
+  .flow{counter-reset:s;list-style:none;padding:0}
+  .flow li{position:relative;padding:8px 0 8px 34px;border-left:2px solid var(--indigo-100);margin-left:10px}
+  .flow li::before{counter-increment:s;content:counter(s);position:absolute;left:-13px;top:7px;width:24px;height:24px;background:var(--indigo);color:#fff;border-radius:50%;text-align:center;font-size:12px;line-height:24px}
+  .legend{font-size:12px;color:var(--gray);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>数界 MathVerse · App 四页设计稿</h1>
+<p class="sub">把「我的」页 4 个死按钮 → 4 个真实详情页：错题本 · 升级会员 · 今日计划 · 估分预测</p>
+<p class="meta">2026-06-02 · 沿用现有视觉（靛蓝 #4F46E5 / 圆角 / Taro 内联样式）· 全部绑定后端已存在的真实 API</p>
+
+<div class="ok"><b>设计原则</b>：① 视觉与现有 4 个 Tab 页完全一致，不引入新设计系统；② 只用后端<b>真实存在</b>的端点（已逐一核对 <code>app/routes/me.py</code> / <code>pay.py</code>）；③ 新页面是非 Tab 页，经 <code>Taro.navigateTo</code> 进入，注册进 <code>app.config.ts</code> 的 <code>pages</code> 数组。</div>
+
+<!-- ───────────────────────── 导航与改动总览 ───────────────────────── -->
+<h2>0 · 导航与改动总览</h2>
+<table>
+<tr><th>页面</th><th>路由</th><th>入口</th><th>核心 API</th><th>需后端改动</th></tr>
+<tr><td>错题本</td><td><code>pages/mistakes/index</code></td><td>「我的」→ 📕 错题本</td><td><code>GET /api/me/mistakes</code> · <code>PATCH /api/me/mistakes/{id}</code></td><td>无</td></tr>
+<tr><td>今日计划</td><td><code>pages/plan/index</code></td><td>「我的」→ 📋 今日计划</td><td><code>GET /api/me/plan/today</code></td><td>无</td></tr>
+<tr><td>估分预测</td><td><code>pages/score/index</code></td><td>「我的」→ 📈 估分预测</td><td><code>GET /api/me/score/estimate</code>（<b>新增</b>）</td><td><b>有（1 个小端点）</b></td></tr>
+<tr><td>升级会员</td><td><code>pages/membership/index</code></td><td>「我的」→ ⭐ 升级会员</td><td><code>GET /api/pay/plans</code> · <code>GET /api/pay/subscription</code> · <code>POST /api/pay/wechat/prepay</code></td><td>无</td></tr>
+</table>
+<p>另需：<code>pages/me/index.tsx</code> 的 4 个 quick-action 项补上 <code>onClick → Taro.navigateTo</code>（当前是死按钮）。</p>
+
+<!-- ───────────────────────── 错题本 ───────────────────────── -->
+<h2>1 · 错题本 <span class="small">pages/mistakes/index</span></h2>
+<div class="mock-row">
+  <div class="phone">
+    <div class="nav"><span class="back">‹</span> 错题本</div>
+    <div class="screen gray"><div class="pad">
+      <div>
+        <span class="chip chip-on">全部</span><span class="chip chip-off">未掌握</span><span class="chip chip-off">已掌握</span>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-sub">高等数学</span><span class="tag tag-warn">概念混淆</span><span class="small">难度 ★★★</span></div>
+        <div class="q">求 lim(x→0) (1−cos x)/x²，多数同学忽略等价无穷小…</div>
+        <div class="small">复习 2 次 · 下次复习 今天</div>
+        <a class="btn-line">复习这道题 →</a>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-sub">线性代数</span><span class="tag tag-ok">已掌握</span></div>
+        <div class="q">设 A 为 3 阶矩阵，|A|=2，求 |2A⁻¹|…</div>
+        <div class="small">复习 4 次 · 已掌握</div>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-sub">概率论</span><span class="small">难度 ★★</span></div>
+        <div class="q">已知 X~N(0,1)，求 P(|X|<1)…</div>
+        <div class="small">未复习 · 下次复习 明天</div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="phone">
+    <div class="nav"><span class="back">‹</span> 复习模式</div>
+    <div class="screen"><div class="pad">
+      <div class="card" style="background:var(--green-bg);border:none">
+        <div class="small" style="color:var(--green)">题目</div>
+        <div class="q" style="color:var(--ink)">求 lim(x→0) (1−cos x)/x²</div>
+      </div>
+      <h3 style="margin:10px 0 6px">解题步骤</h3>
+      <div class="card"><b style="color:var(--indigo-700);font-size:13px">【Step 1】等价无穷小代换</b>
+        <div class="q">1−cos x ~ x²/2 (x→0)</div></div>
+      <div class="card"><b style="color:var(--indigo-700);font-size:13px">【Step 2】代入求极限</b>
+        <div class="q">原式 = (x²/2)/x² = 1/2</div></div>
+      <p class="small" style="margin-top:10px">这次复习的掌握程度？</p>
+      <div class="rate-row">
+        <div class="rate">没记住<br><span class="small">again</span></div>
+        <div class="rate">有点难<br><span class="small">hard</span></div>
+        <div class="rate">记得<br><span class="small">good</span></div>
+        <div class="rate">很简单<br><span class="small">easy</span></div>
+      </div>
+      <a class="btn">✓ 标记已掌握</a>
+    </div></div>
+  </div>
+</div>
+
+<h3>API 绑定</h3>
+<table>
+<tr><th>动作</th><th>请求</th><th>用到的字段</th></tr>
+<tr><td>列表加载 / 筛选 / 翻页</td><td><code>GET /api/me/mistakes?mastered=&subject=&page=&page_size=</code></td><td>返回 <code>items[]</code>：<code>id, question_text, subject, difficulty, error_type, mastered, next_review_at, solution_steps[], review_count</code> + <code>total, page</code></td></tr>
+<tr><td>FSRS 复习评分</td><td><code>PATCH /api/me/mistakes/{id}</code> body <code>{review_rating:1|2|3|4}</code></td><td>1=没记住 2=有点难 3=记得 4=很简单（对应 fsrs again/hard/good/easy）</td></tr>
+<tr><td>标记已掌握</td><td><code>PATCH /api/me/mistakes/{id}</code> body <code>{mastered:true}</code></td><td>—</td></tr>
+</table>
+<h3>交互规格</h3>
+<ul>
+<li>顶部筛选 chip：<b>全部 / 未掌握 / 已掌握</b> → 改 <code>mastered</code> query（全部=不传）。学科二级筛选先不做（可后续加）。</li>
+<li>卡片显示：学科 tag、<code>error_type</code> tag（有才显示）、难度星（<code>difficulty</code> 1-5）、题目截断 2 行、<code>review_count</code> + 下次复习日（<code>next_review_at</code> 相对今天：今天/明天/N天后/已到期）。</li>
+<li>「复习这道题」展开 <code>solution_steps</code>（结构同解题页 step：<code>title/content</code>），底部 4 档评分 + 「标记已掌握」。评分/标记成功后刷新列表。</li>
+<li>三态：加载中 / 空（「还没有错题，去解题页把不会的加进来」）/ 列表。分页：滚动到底 <code>onReachBottom</code> 加载下一页（<code>page+1</code> 直到 <code>items.length>=total</code>）。</li>
+</ul>
+<div class="note"><b>数据来源说明</b>：错题目前由谁写入？后端 <code>POST /api/me/mistakes</code> 存在但<b>前端解题页暂未调用</b>它。本页先把「读+复习」闭环做完；「解题后一键加入错题本」是后续解题页的小增强（不在本次范围，但本页空态文案已为它留好引导）。</div>
+
+<!-- ───────────────────────── 今日计划 ───────────────────────── -->
+<h2>2 · 今日计划 <span class="small">pages/plan/index</span></h2>
+<div class="mock-row">
+  <div class="phone">
+    <div class="nav"><span class="back">‹</span> 今日计划</div>
+    <div class="screen gray"><div class="pad">
+      <div class="card" style="background:var(--indigo);color:#fff;border:none">
+        <div style="font-size:13px;opacity:.85">2026-06-02 · 今日任务</div>
+        <div style="font-size:22px;font-weight:800;margin-top:2px">5 个薄弱知识点</div>
+        <div class="small" style="color:#c7d2fe">按掌握度 + 高频考点排序</div>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-learn">新学</span><span class="tag tag-sub">高等数学</span></div>
+        <div class="q" style="font-weight:600">多元函数极值</div>
+        <div class="small">第七章 · 掌握度 12%，高频考点</div>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-review">复习</span><span class="tag tag-sub">线性代数</span></div>
+        <div class="q" style="font-weight:600">特征值与特征向量</div>
+        <div class="small">第五章 · 掌握度 45%，建议加强</div>
+      </div>
+      <div class="card">
+        <div><span class="tag tag-learn">新学</span><span class="tag tag-sub">概率论</span></div>
+        <div class="q" style="font-weight:600">大数定律</div>
+        <div class="small">第五章 · 掌握度 8%，高频考点</div>
+      </div>
+      <a class="btn">去学习页 →</a>
+    </div></div>
+  </div>
+  <div style="flex:1;min-width:300px">
+    <h3>API 绑定</h3>
+    <table>
+    <tr><th>请求</th><th>返回</th></tr>
+    <tr><td><code>GET /api/me/plan/today</code></td><td><code>{date, tasks:[{kp_id, name, chapter, task_type, reason}]}</code>（后端无计划时自动生成并落库，幂等）</td></tr>
+    </table>
+    <h3>交互规格</h3>
+    <ul>
+      <li>顶部卡：日期 + 任务数 + 一句排序说明。</li>
+      <li>任务卡：<code>task_type</code>（<code>learn</code>=新学 / <code>review</code>=复习）tag、学科 tag、<code>name</code> 大字、<code>chapter</code> + <code>reason</code>（后端已含「掌握度 12%，高频考点」文案，直接显示）。</li>
+      <li>底部「去学习页」<code>Taro.switchTab</code> 到 <code>pages/learn/index</code>。任务卡本身先不跳转（学习页按 KP 定位是后续增强）。</li>
+      <li>三态：加载中 / 空（<code>tasks=[]</code>，「太棒了！暂无薄弱点」）/ 列表。</li>
+    </ul>
+    <div class="ok">本页最轻量，纯展示，零后端改动。</div>
+  </div>
+</div>
+
+<!-- ───────────────────────── 估分预测 ───────────────────────── -->
+<h2>3 · 估分预测 <span class="small">pages/score/index</span></h2>
+<div class="mock-row">
+  <div class="phone">
+    <div class="nav"><span class="back">‹</span> 估分预测</div>
+    <div class="screen"><div class="pad">
+      <div class="seg"><span class="on">数学一</span><span class="off">数学二</span><span class="off">数学三</span></div>
+      <div class="gauge"><div class="inner"><div class="big">108</div><div class="small">预测得分</div></div></div>
+      <p style="text-align:center" class="small">区间 96–120 分 · 满分 150</p>
+      <div class="card" style="text-align:center;background:var(--green-bg);border:none">
+        <div class="small" style="color:var(--green)">及格概率</div>
+        <div style="font-size:22px;font-weight:800;color:var(--green)">72%</div>
+      </div>
+      <h3 style="margin:12px 0 6px">薄弱环节（优先突破）</h3>
+      <div class="card" style="padding:9px"><span class="tag tag-warn">弱</span>多元函数微分学</div>
+      <div class="card" style="padding:9px"><span class="tag tag-warn">弱</span>二重积分</div>
+      <div class="card" style="padding:9px"><span class="tag tag-warn">弱</span>无穷级数</div>
+    </div></div>
+  </div>
+  <div style="flex:1;min-width:300px">
+    <h3>API 绑定（含本次唯一后端改动）</h3>
+    <div class="danger"><b>API 缺口与决定</b>：现有 <code>POST /api/me/score/estimate</code> 要求前端传 <code>knowledge_points</code>（每个 KP→掌握度 的完整字典），但<b>没有任何 GET 暴露这个原始字典</b>（<code>/progress/radar</code> 只给 3 个学科聚合值，无法反推）。<br><b>决定（已确认）</b>：后端新增 <code>GET /api/me/score/estimate</code>，直接从 <code>LearningProgress</code> 读掌握度 + <code>user.exam_mode</code>，复用现有 <code>estimate_score()</code>。前端零负担。仿照 <code>plan/today</code> 自取 DB 数据的写法。</div>
+    <table>
+    <tr><th>请求</th><th>返回（沿用 <code>estimate_score</code> 的结构）</th></tr>
+    <tr><td><code>GET /api/me/score/estimate?exam_mode=math-1</code><br>（默认取 <code>user.exam_mode</code>）</td><td><code>{estimated_score, score_range, pass_probability, weak_areas[]}</code></td></tr>
+    </table>
+    <h3>交互规格</h3>
+    <ul>
+      <li>顶部 <code>exam_mode</code> 三段选择器（数学一/二/三），切换重新请求。默认 = 用户 <code>exam_mode</code>（无则 math-1）。</li>
+      <li>环形仪表显示 <code>estimated_score</code>（/150），下方 <code>score_range</code>。</li>
+      <li>及格概率卡显示 <code>pass_probability</code>%。</li>
+      <li><code>weak_areas[]</code> 返回的是 <b>kp_id</b> → 前端用知识图谱把 id 映射成中文名（<code>learn</code> store 已加载 KG，可复用；映射不到则原样显示 id）。</li>
+      <li>无学习数据时（掌握度全空）→ 后端返回 <code>estimated_score:0</code>，前端显示「先去做几道题，攒点数据再估分」。</li>
+    </ul>
+    <div class="note">估分是 2000 次蒙特卡洛的<b>粗略代理</b>（后端 <code>score.py</code> 已注明），页面文案需弱化精确性、强调「趋势参考」。</div>
+  </div>
+</div>
+
+<!-- ───────────────────────── 升级会员 ───────────────────────── -->
+<h2>4 · 升级会员 <span class="small">pages/membership/index</span></h2>
+<div class="mock-row">
+  <div class="phone">
+    <div class="nav"><span class="back">‹</span> 升级会员</div>
+    <div class="screen gray"><div class="pad">
+      <div class="card" style="background:linear-gradient(135deg,#4F46E5,#6366f1);color:#fff;border:none">
+        <div style="font-size:13px;opacity:.85">当前身份</div>
+        <div style="font-size:18px;font-weight:800">免费版</div>
+        <div class="small" style="color:#c7d2fe">每日 10 次解题额度</div>
+      </div>
+      <div class="price-card">
+        <div style="font-weight:600">月卡</div>
+        <div><span class="amt">¥29</span><span class="unit"> / 30天</span></div>
+      </div>
+      <div class="price-card hot">
+        <div class="badge-hot">超值</div>
+        <div style="font-weight:600">季卡</div>
+        <div><span class="amt">¥69</span><span class="unit"> / 90天</span></div>
+        <div class="small">日均仅 0.77 元</div>
+      </div>
+      <div class="price-card">
+        <div style="font-weight:600">年卡</div>
+        <div><span class="amt">¥199</span><span class="unit"> / 365天</span></div>
+      </div>
+      <a class="btn">微信支付 ¥69 开通季卡</a>
+    </div></div>
+  </div>
+  <div style="flex:1;min-width:300px">
+    <h3>API 绑定</h3>
+    <table>
+    <tr><th>动作</th><th>请求 / 返回</th></tr>
+    <tr><td>当前身份</td><td><code>GET /api/pay/subscription</code> → <code>{tier, tier_expires_at, active_subscription}</code></td></tr>
+    <tr><td>套餐列表</td><td><code>GET /api/pay/plans</code> → <code>plans:[{id, name, amount, days}]</code>（<code>amount</code> 单位<b>分</b>，÷100 显示）</td></tr>
+    <tr><td>下单</td><td><code>POST /api/pay/wechat/prepay</code> body <code>{plan:"quarterly"}</code> → <code>{order_id, amount, prepay_params{timeStamp,nonceStr,package,signType,paySign}}</code></td></tr>
+    <tr><td>拉起支付</td><td><code>Taro.requestPayment(prepay_params)</code></td></tr>
+    </table>
+    <h3>支付流程</h3>
+    <ol class="flow">
+      <li>进入页 → 并行拉 <code>subscription</code> + <code>plans</code>，渲染当前身份与三张套餐卡（季卡默认高亮「超值」）。</li>
+      <li>选套餐 → 底部按钮文案随选中项变化。</li>
+      <li>点支付 → <code>POST prepay</code> 拿 <code>prepay_params</code> → <code>Taro.requestPayment</code>。</li>
+      <li>支付成功回调由后端 <code>/wechat/callback</code> 处理（激活订阅、升级 tier）→ 前端 <code>requestPayment</code> success 后重新拉 <code>subscription</code> 刷新身份。</li>
+    </ol>
+    <div class="danger"><b>真实支付的前置条件（非本次代码能解决）</b>：服务器 <code>.env</code> 的 <code>WECHAT_*</code> 当前为空，<code>prepay</code> 返回的 <code>paySign</code> 是 <code>MOCK_SIGN</code> → <code>Taro.requestPayment</code> 会被微信拒绝。<br><b>本页策略</b>：完整搭好真实流程；<code>requestPayment</code> fail 时优雅提示「支付功能即将开放」，不崩。配齐微信商户密钥后<b>零改前端</b>即可真实付费。</div>
+  </div>
+</div>
+
+<!-- ───────────────────────── 实施清单 ───────────────────────── -->
+<h2>5 · 实施清单（先设计后实现的「实现」步骤 + 验证点）</h2>
+<table>
+<tr><th>#</th><th>步骤</th><th>验证点</th></tr>
+<tr><td>1</td><td>后端：<code>me.py</code> 新增 <code>GET /api/me/score/estimate</code>（从 DB 读掌握度，复用 <code>estimate_score</code>）</td><td>新增 pytest：无数据→0；有数据→返回四字段。<code>pytest</code> 全绿</td></tr>
+<tr><td>2</td><td>前端：<code>services/api.ts</code> 无需改；新建 <code>stores/me.ts</code> 或在各页用 <code>request()</code> 直连（按现有 me 页风格，页面内直接 <code>request</code>）</td><td>—</td></tr>
+<tr><td>3</td><td>前端：<code>pages/mistakes/index</code>（列表+筛选+复习评分+标记掌握+分页+三态）</td><td>构建无 TS 报错（Taro lib 噪声除外）</td></tr>
+<tr><td>4</td><td>前端：<code>pages/plan/index</code>（任务卡+三态+去学习页）</td><td>同上</td></tr>
+<tr><td>5</td><td>前端：<code>pages/score/index</code>（exam_mode 选择+仪表+及格率+薄弱点 KG 映射+空态）</td><td>同上</td></tr>
+<tr><td>6</td><td>前端：<code>pages/membership/index</code>（身份+套餐+下单+requestPayment+优雅降级）</td><td>同上</td></tr>
+<tr><td>7</td><td>前端：<code>app.config.ts</code> 注册 4 个新页；<code>pages/me/index.tsx</code> 4 个 quick-action 接 <code>onClick → navigateTo</code></td><td><code>npm run build:weapp</code> 通过</td></tr>
+</table>
+
+<div class="ok"><b>验收口径</b>：后端 <code>pytest</code> 全绿（含新端点测试）；前端 <code>npm run build:weapp</code> 成功；4 个新页可从「我的」点进、视觉与现有页一致、绑定真实 API（错题本/计划/估分跑通；会员页流程完整但真实付费待微信密钥）。</div>
+
+</div>
+</body>
+</html>
