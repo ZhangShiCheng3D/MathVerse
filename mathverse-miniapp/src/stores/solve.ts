@@ -25,11 +25,13 @@ interface SolveStore {
   expandedStepIndex: number | null;
   whyExplanation: string;
   isWhyLoading: boolean;
+  addedToMistakes: boolean;
   setQuestion: (q: string) => void;
   solve: (stage: string) => Promise<void>;
   solveByPhoto: (stage: string) => Promise<void>;
   expandLayer: (layer: 1 | 2 | 3) => void;
   askWhy: (stepIndex: number, stepContent: string) => Promise<void>;
+  addToMistakes: () => Promise<void>;
   reset: () => void;
 }
 
@@ -41,13 +43,14 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
   expandedStepIndex: null,
   whyExplanation: '',
   isWhyLoading: false,
+  addedToMistakes: false,
 
   setQuestion: (q) => set({ question: q }),
 
   solve: async (stage) => {
     const { question } = get();
     if (!question.trim()) return;
-    set({ isSolving: true, result: null });
+    set({ isSolving: true, result: null, addedToMistakes: false });
     try {
       const result = await request<SolveResult>('/api/solve/deep', {
         method: 'POST',
@@ -73,7 +76,7 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
       return; // user cancelled the picker
     }
     if (!filePath) return;
-    set({ isSolving: true, result: null });
+    set({ isSolving: true, result: null, addedToMistakes: false });
     try {
       const base64 = Taro.getFileSystemManager().readFileSync(filePath, 'base64') as string;
       const data = await request<{ answer: string }>('/api/solve/vision', {
@@ -117,6 +120,20 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
     }
   },
 
+  addToMistakes: async () => {
+    const { question, result, addedToMistakes } = get();
+    if (!result || addedToMistakes) return;
+    await request('/api/me/mistakes', {
+      method: 'POST',
+      data: {
+        question_text: question,
+        correct_answer: result.answer,
+        solution_steps: result.steps,
+      },
+    });
+    set({ addedToMistakes: true });
+  },
+
   reset: () => set({
     question: '',
     isSolving: false,
@@ -124,5 +141,6 @@ export const useSolveStore = create<SolveStore>((set, get) => ({
     expandedLayer: 1,
     expandedStepIndex: null,
     whyExplanation: '',
+    addedToMistakes: false,
   }),
 }));

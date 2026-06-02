@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Button, Input } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import { useLearnStore } from '../../stores/learn';
 
 const STAGES = [
@@ -19,10 +20,19 @@ const masteryColor = (m: number) => {
 
 export default function LearnPage() {
   const {
-    stage, setStage, kgData, selectedKp, lecture, exercises, grades, gradingIndex, activeTab,
-    isLoading, fetchKg, selectKp, fetchLecture, fetchExercise, gradeAnswer,
+    stage, setStage, kgData, selectedKp, lecture, exercises, grades, addedMistakes, gradingIndex, activeTab,
+    isLoading, fetchKg, selectKp, fetchLecture, fetchExercise, gradeAnswer, addExerciseMistake,
   } = useLearnStore();
   const [answers, setAnswers] = useState<Record<number, string>>({});
+
+  const handleAddMistake = async (i: number) => {
+    try {
+      await addExerciseMistake(i, answers[i] || '');
+      Taro.showToast({ title: '已加入错题本', icon: 'success' });
+    } catch (e: any) {
+      Taro.showToast({ title: e?.message === 'Authentication required' ? '请先登录' : '加入失败', icon: 'none' });
+    }
+  };
 
   useEffect(() => {
     fetchKg();
@@ -222,6 +232,22 @@ export default function LearnPage() {
                         <Text style={{ fontSize: '13px', color: '#6b7280', display: 'block', marginTop: '4px', lineHeight: '1.6' }}>
                           解析：{q.analysis}
                         </Text>
+                      )}
+                      {!grade.correct && (
+                        <Button
+                          style={{
+                            marginTop: '10px',
+                            backgroundColor: addedMistakes[i] ? '#f3f4f6' : '#fff',
+                            color: addedMistakes[i] ? '#9ca3af' : '#4F46E5',
+                            border: addedMistakes[i] ? '1px solid #e5e7eb' : '1px solid #4F46E5',
+                            borderRadius: '9999px',
+                            fontSize: '14px',
+                          }}
+                          disabled={addedMistakes[i]}
+                          onClick={() => handleAddMistake(i)}
+                        >
+                          {addedMistakes[i] ? '✓ 已加入错题本' : '📕 加入错题本'}
+                        </Button>
                       )}
                     </View>
                   )}

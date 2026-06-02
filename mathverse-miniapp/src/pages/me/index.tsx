@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Button } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import { request } from '../../services/api';
 import { useUserStore } from '../../stores/user';
 
@@ -125,13 +126,14 @@ export default function MePage() {
       <View style={{ padding: '16px' }}>
         <View style={{ backgroundColor: '#fff', borderRadius: '12px', overflow: 'hidden' }}>
           {[
-            { icon: '📕', label: '错题本', badge: reviewCount > 0 ? `${reviewCount}题待复习` : null },
-            { icon: '📋', label: '今日计划' },
-            { icon: '📈', label: '估分预测' },
-            { icon: '⭐', label: '升级会员' },
+            { icon: '📕', label: '错题本', badge: reviewCount > 0 ? `${reviewCount}题待复习` : null, path: '/pages/mistakes/index' },
+            { icon: '📋', label: '今日计划', path: '/pages/plan/index' },
+            { icon: '📈', label: '估分预测', path: '/pages/score/index' },
+            { icon: '⭐', label: '升级会员', path: '/pages/membership/index' },
           ].map((item) => (
             <View
               key={item.label}
+              onClick={() => Taro.navigateTo({ url: item.path })}
               style={{
                 display: 'flex',
                 alignItems: 'center',

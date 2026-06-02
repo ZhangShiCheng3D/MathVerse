@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, Textarea, Button, ScrollView } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import { useSolveStore } from '../../stores/solve';
 import { useUserStore } from '../../stores/user';
 
@@ -8,9 +9,20 @@ export default function SolvePage() {
     question, setQuestion, isSolving, result,
     expandedLayer, expandLayer, askWhy,
     whyExplanation, solve, solveByPhoto, reset,
+    addToMistakes, addedToMistakes,
   } = useSolveStore();
   const user = useUserStore((s) => s.user);
   const [error, setError] = useState('');
+
+  const handleAddMistake = async () => {
+    try {
+      await addToMistakes();
+      Taro.showToast({ title: '已加入错题本', icon: 'success' });
+    } catch (err: any) {
+      const msg = err?.message === 'Authentication required' ? '请先登录' : '加入失败';
+      Taro.showToast({ title: msg, icon: 'none' });
+    }
+  };
 
   const handleSolve = async () => {
     setError('');
@@ -162,6 +174,24 @@ export default function SolvePage() {
               </Button>
             )}
           </View>
+
+          {/* Add to mistake notebook — only for text questions (photo solve has no question text) */}
+          {question.trim() && (
+            <Button
+              style={{
+                marginBottom: '32px',
+                backgroundColor: addedToMistakes ? '#f3f4f6' : '#fff',
+                color: addedToMistakes ? '#9ca3af' : '#4F46E5',
+                border: addedToMistakes ? '1px solid #e5e7eb' : '1px solid #4F46E5',
+                borderRadius: '9999px',
+                fontSize: '14px',
+              }}
+              disabled={addedToMistakes}
+              onClick={handleAddMistake}
+            >
+              {addedToMistakes ? '✓ 已加入错题本' : '📕 加入错题本'}
+            </Button>
+          )}
         </ScrollView>
       )}
     </View>

@@ -119,6 +119,30 @@ def test_score_estimate(auth):
     assert "estimated_score" in resp.json()
 
 
+def test_score_estimate_get_empty(auth):
+    # No learning data yet → coarse estimate returns a zeroed result, not 500.
+    _, headers = auth
+    resp = client.get("/api/me/score/estimate", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["estimated_score"] == 0
+    assert body["weak_areas"] == []
+
+
+def test_score_estimate_get_with_data(auth):
+    # A graded mistake writes LearningProgress; GET estimate reads it from DB.
+    _, headers = auth
+    client.post("/api/me/mistakes", headers=headers, json={
+        "question_text": "q", "correct_answer": "a", "knowledge_point_id": "gs-1.1",
+    })
+    resp = client.get("/api/me/score/estimate?exam_mode=math-2", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "estimated_score" in body
+    assert "pass_probability" in body
+    assert "weak_areas" in body
+
+
 def test_streak(auth):
     _, headers = auth
     resp = client.get("/api/me/streak", headers=headers)

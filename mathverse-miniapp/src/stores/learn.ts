@@ -34,6 +34,7 @@ interface LearnStore {
   lecture: string;
   exercises: Question[];
   grades: Record<number, { correct: boolean; feedback: string }>;
+  addedMistakes: Record<number, boolean>;
   gradingIndex: number | null;
   activeTab: 'lecture' | 'exercise';
   isLoading: boolean;
@@ -43,7 +44,15 @@ interface LearnStore {
   fetchLecture: (kpName: string, kpId: string) => Promise<void>;
   fetchExercise: (kpName: string, kpId: string) => Promise<void>;
   gradeAnswer: (index: number, userAnswer: string) => Promise<void>;
+  addExerciseMistake: (index: number, userAnswer: string) => Promise<void>;
 }
+
+const _subjectOf = (kpId: string): string => {
+  if (kpId.startsWith('xd')) return '线性代数';
+  if (kpId.startsWith('gl')) return '概率论与数理统计';
+  if (kpId.startsWith('gs')) return '高等数学';
+  return '';
+};
 
 export const useLearnStore = create<LearnStore>((set, get) => ({
   stage: 'college',
@@ -52,11 +61,12 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
   lecture: '',
   exercises: [],
   grades: {},
+  addedMistakes: {},
   gradingIndex: null,
   activeTab: 'lecture',
   isLoading: false,
 
-  setStage: (stage) => set({ stage, selectedKp: null, lecture: '', exercises: [], grades: {} }),
+  setStage: (stage) => set({ stage, selectedKp: null, lecture: '', exercises: [], grades: {}, addedMistakes: {} }),
 
   fetchKg: async () => {
     set({ isLoading: true });
@@ -70,7 +80,7 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
     }
   },
 
-  selectKp: (kp) => set({ selectedKp: kp, lecture: '', exercises: [], grades: {}, activeTab: 'lecture' }),
+  selectKp: (kp) => set({ selectedKp: kp, lecture: '', exercises: [], grades: {}, addedMistakes: {}, activeTab: 'lecture' }),
 
   fetchLecture: async (kpName, kpId) => {
     set({ isLoading: true });
@@ -86,7 +96,7 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
   },
 
   fetchExercise: async (kpName, kpId) => {
-    set({ isLoading: true, activeTab: 'exercise', exercises: [], grades: {}, gradingIndex: null });
+    set({ isLoading: true, activeTab: 'exercise', exercises: [], grades: {}, addedMistakes: {}, gradingIndex: null });
     try {
       const data = await request<{ questions: Question[] }>('/api/learn/exercise/generate', {
         method: 'POST',
@@ -124,5 +134,24 @@ export const useLearnStore = create<LearnStore>((set, get) => ({
         gradingIndex: null,
       }));
     }
+  },
+
+  addExerciseMistake: async (index, userAnswer) => {
+    const q = get().exercises[index];
+    const kp = get().selectedKp;
+    if (!q || !kp || get().addedMistakes[index]) return;
+    await request('/api/me/mistakes', {
+      method: 'POST',
+      data: {
+        question_text: q.question,
+        user_answer: userAnswer,
+        correct_answer: q.answer,
+        solution_steps: q.analysis ? [{ title: '解析', content: q.analysis }] : undefined,
+        knowledge_point_id: kp.id,
+        subject: _subjectOf(kp.id),
+        difficulty: kp.difficulty,
+      },
+    });
+    set((s) => ({ addedMistakes: { ...s.addedMistakes, [index]: true } }));
   },
 }));
