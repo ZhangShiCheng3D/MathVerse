@@ -17,7 +17,7 @@ The AI reasoning runs in an **external DeepTutor service** (`ghcr.io/hkuds/deept
 ```bash
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8002
-pytest                                          # all tests (91 currently, all green)
+pytest                                          # all tests (95 currently, all green)
 pytest tests/test_solve.py                      # one file
 pytest tests/test_agent_client.py::test_deep_solve_parses_structured_json   # one test
 ```
@@ -159,4 +159,6 @@ A **Capacitor-wrapped H5 build** ships the same Taro codebase (`mathverse-miniap
 - SMS (user-only): real send needs `TENCENT_SMS_*` (secret_id/key, sdk_app_id, sign, template_id) + `sms_enabled=true`; Tencent sign/template approval pending (`314159` is the interim bypass).
 - Android (user-only): release-keystore signing + store-listing assets (the debug APK installs for testing).
 - Migrate `generate_quiz` / lecture from legacy `_post` to `question/*` WS (event schema unconfirmed).
-- Frontend streaming UI; route `exercise/grade` to DeepTutor `quiz_judge`; OCR via `vision_solve`.
+- Route `exercise/grade` to DeepTutor `quiz_judge` (currently DeepSeek-direct, works); OCR via `vision_solve` (photo-solve already works via DashScope).
+
+**Done since (autonomous polish round):** 流式解题（`WS /ws/solve`，附加式，POST 兜底；前端 `Taro.connectSocket` 双端，CapacitorHttp 不拦 WS，模拟器验证通过）· 多学段知识图谱（小学/初中/高中）+ 共享 `services/kg.py` + 雷达图按学段聚合 · 用户档案设置页（`PATCH /api/me/profile`，学段/考试类型/昵称）· 品牌图标/启动图/Tab 图标（`scripts/gen_*.py`）· 前端测试基建（Vitest，`npm run test`）· 登录页重做 + 429 误报修复 · KG 缓存污染修复.
