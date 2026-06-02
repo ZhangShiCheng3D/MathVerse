@@ -134,6 +134,56 @@ class AgentClient:
         finally:
             self._inflight.release()
 
+    async def _guarded_stream(self, agen):
+        """Streaming variant of _guarded: same circuit + admission gate, yielding items."""
+        if not self.circuit.can_try():
+            await agen.aclose()
+            raise AgentUnavailableError("DeepTutor circuit breaker open")
+        try:
+            await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
+        except asyncio.TimeoutError:
+            await agen.aclose()
+            raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
+        try:
+            async for item in agen:
+                yield item
+            self.circuit.record_success()
+        except (deeptutor_ws.WSStreamError, OSError, asyncio.TimeoutError,
+                websockets.WebSocketException) as e:
+            self.circuit.record_failure()
+            raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
+        finally:
+            self._inflight.release()
+
+    async def deep_solve_stream(self, question: str, stage: str):
+        """Streaming deep-solve: yields ('chunk', delta) then ('result', SolveResult)."""
+        message = (
+            f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
+            f"{_SOLVE_SCHEMA_HINT}\n\n题目：\n{question}"
+        )
+        async for kind, content in self._guarded_stream(
+            deeptutor_ws.chat_stream(message, mode="solve", timeout=90.0)
+        ):
+            if kind == "chunk":
+                yield ("chunk", content)
+            elif kind == "result":
+                parsed = _extract_json(content)
+                if parsed:
+                    yield ("result", SolveResult(
+                        status="success",
+                        answer=parsed.get("answer") or content,
+                        steps=parsed.get("steps", []),
+                        knowledge_points=parsed.get("knowledge_points", []),
+                        related_topics=parsed.get("related_topics", []),
+                        common_mistakes=parsed.get("common_mistakes", []),
+                        tokens_used=0,
+                    ))
+                else:
+                    yield ("result", SolveResult(
+                        status="success", answer=content, steps=[], knowledge_points=[],
+                        related_topics=[], common_mistakes=[], tokens_used=0,
+                    ))
+
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
 
