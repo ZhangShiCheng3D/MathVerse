@@ -47,6 +47,12 @@ def generate_and_store(db, phone: str) -> str:
 
 
 def verify(db, phone: str, code: str) -> bool:
+    # Interim master code (SMS approval pending): accepts any phone with no real
+    # code sent. Dev mode only — real SMS (sms_enabled=True) ignores it.
+    if (not settings.sms_enabled
+            and settings.sms_master_code
+            and code == settings.sms_master_code):
+        return True
     rec = db.query(SmsCode).filter(
         SmsCode.phone == phone,
         SmsCode.code == code,

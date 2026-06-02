@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     tencent_sms_region: str = "ap-guangzhou"
     sms_code_ttl_seconds: int = 300
     sms_resend_interval: int = 60
+    # INTERIM backdoor while the Tencent SMS sign/template approval is pending:
+    # this code logs in ANY phone without a real code. Honored ONLY in dev mode
+    # (sms_enabled=False) — real SMS going live (sms_enabled=True) disables it.
+    # Clear it (SMS_MASTER_CODE="") once approval lands to remove the backdoor.
+    sms_master_code: str = "314159"
     free_daily_quota: int = 10
     sensitive_words: str = ""  # comma-separated; operationally configured per deploy
     class Config:

@@ -106,6 +106,7 @@ sms_resend_interval: int = 60      # 同号 60s 限发一次</code></pre>
 <tr><td><code>POST /api/auth/sms/verify</code></td><td><code>{phone, code}</code>。校验码；<b>按 phone find-or-create User</b>（新用户 nickname=「用户+尾号」）；发 JWT。</td><td><code>{access_token, refresh_token, user:{…}}</code>（结构同 <code>mp-login</code>）</td></tr>
 </table>
 <div class="note"><b>dev 模式回传验证码</b>仅在 <code>sms_enabled=False</code> 时返回 <code>debug_code</code>，方便现在就把登录流跑通并写测试。配齐短信商凭证（<code>sms_enabled=True</code>）后自动停止回传——与"微信密钥延后"完全同构。</div>
+<div class="danger"><b>过渡万能码（审批中临时后门）</b>：腾讯短信签名/模板审批期间，<code>verify</code> 接受 <b>万能码 <code>sms_master_code</code>（默认 <code>314159</code>）</b>——任意手机号、无需发码即可登录。<b>仅 dev 模式（<code>sms_enabled=False</code>）生效</b>，真实短信上线后自动失效。审批通过后置 <code>SMS_MASTER_CODE=""</code> 彻底移除此后门。</div>
 
 <h3>1.5 测试 <span class="pill">tests/test_auth.py</span></h3>
 <ul>

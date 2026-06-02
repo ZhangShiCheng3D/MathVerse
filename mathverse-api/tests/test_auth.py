@@ -185,3 +185,28 @@ def test_sms_send_rate_limited(client):
         assert second.status_code == 429
     finally:
         _cleanup_phone(phone)
+
+
+def test_sms_master_code_logs_in_without_send(client):
+    # Interim backdoor (SMS approval pending): 314159 logs in any phone, no send.
+    phone = "13900000005"
+    _cleanup_phone(phone)
+    try:
+        resp = client.post("/api/auth/sms/verify", json={"phone": phone, "code": "314159"})
+        assert resp.status_code == 200
+        assert resp.json()["access_token"]
+    finally:
+        _cleanup_phone(phone)
+
+
+def test_sms_master_code_ignored_when_sms_enabled(monkeypatch):
+    # Once real SMS is live, the master code is no longer a valid login.
+    from app.config import settings
+    from app.database import SessionLocal
+    from app.services import sms
+    monkeypatch.setattr(settings, "sms_enabled", True)
+    db = SessionLocal()
+    try:
+        assert sms.verify(db, "13900000006", "314159") is False
+    finally:
+        db.close()
