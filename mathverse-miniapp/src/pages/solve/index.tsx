@@ -8,8 +8,8 @@ export default function SolvePage() {
   const {
     question, setQuestion, isSolving, result,
     expandedLayer, expandLayer, askWhy,
-    whyExplanation, solve, solveByPhoto, reset,
-    addToMistakes, addedToMistakes,
+    whyExplanation, solveStreaming, solveByPhoto, reset,
+    addToMistakes, addedToMistakes, streamingText, isStreaming,
   } = useSolveStore();
   const user = useUserStore((s) => s.user);
   const [error, setError] = useState('');
@@ -27,11 +27,15 @@ export default function SolvePage() {
   const handleSolve = async () => {
     setError('');
     try {
-      await solve(user?.current_stage || 'college');
+      await solveStreaming(user?.current_stage || 'college');
     } catch (err: any) {
       setError(err.message || '解题失败');
     }
   };
+
+  // Streaming prose ends with a ```json``` block we rebuild into the layered view —
+  // hide that raw block from the live typing display.
+  const liveText = streamingText.split('```')[0].trim();
 
   const handlePhoto = async () => {
     setError('');
@@ -81,10 +85,17 @@ export default function SolvePage() {
         {error && <Text style={{ color: '#ef4444', fontSize: '14px', marginTop: '4px' }}>{error}</Text>}
       </View>
 
-      {/* Loading */}
-      {isSolving && (
-        <View className='text-center py-12'>
-          <Text style={{ color: '#9ca3af' }}>AI 正在分析你的题目...</Text>
+      {/* Streaming / loading */}
+      {isSolving && !result && (
+        <View style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '12px', marginBottom: '16px' }}>
+          {liveText ? (
+            <Text style={{ fontSize: '15px', lineHeight: '1.8', color: '#374151', whiteSpace: 'pre-wrap' }}>
+              {liveText}
+              <Text style={{ color: '#4F46E5' }}>▍</Text>
+            </Text>
+          ) : (
+            <Text style={{ color: '#9ca3af' }}>{isStreaming ? 'AI 正在思考…' : 'AI 正在分析你的题目...'}</Text>
+          )}
         </View>
       )}
 

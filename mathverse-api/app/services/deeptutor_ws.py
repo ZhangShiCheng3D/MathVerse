@@ -90,6 +90,27 @@ async def chat(message: str, mode: str = "solve", session_id: str | None = None,
     return {"answer": answer, "session_id": sid, "statuses": statuses}
 
 
+async def chat_stream(message: str, mode: str = "solve", timeout: float = 90.0):
+    """WS /api/v1/chat — yield ('chunk', delta) per stream event, then ('result', full)."""
+    answer = ""
+    req = {"message": message, "mode": mode}
+    async for ev in _stream("/api/v1/chat", req, timeout):
+        t = ev.get("type")
+        if t == "stream":
+            delta = ev.get("content", "")
+            if delta:
+                answer += delta
+                yield ("chunk", delta)
+        elif t == "result":
+            answer = ev.get("content") or answer
+            yield ("result", answer)
+            return
+        elif t == "error":
+            raise WSStreamError(ev.get("message") or ev.get("content") or "chat error")
+    # Stream ended without an explicit result event.
+    yield ("result", answer)
+
+
 async def vision_solve(question: str, image_base64: str | None = None,
                        image_url: str | None = None, session_id: str | None = None,
                        timeout: float = 90.0) -> dict:
