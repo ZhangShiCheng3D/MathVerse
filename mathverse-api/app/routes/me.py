@@ -10,6 +10,7 @@ from app.models.all import (
 )
 from app.database import get_db
 from app.services.fsrs import get_next_review_date
+from app.services.kg import kp_to_subject, subject_order
 from app.services.score import estimate_score
 from app.services.plan_generator import generate_daily_tasks
 from app.services.progress import record_attempt
@@ -47,25 +48,23 @@ async def get_progress(user: User = Depends(get_current_user), db: Session = Dep
 
 @router.get("/progress/radar")
 async def get_radar(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Get radar chart data grouped by subject."""
+    """Radar chart grouped by the subjects of the user's current stage."""
     records = db.query(LearningProgress).filter(
         LearningProgress.user_id == user.id
     ).all()
 
-    subjects = {"高等数学": [], "线性代数": [], "概率论与数理统计": []}
+    stage = user.current_stage if user.current_stage and user.current_stage != "unset" else "kaoyan"
+    kp_subject = kp_to_subject(stage)
+    levels: dict[str, list[float]] = {name: [] for name in subject_order(stage)}
     for r in records:
-        kp_id = r.knowledge_point_id
-        if kp_id.startswith("gs"):
-            subjects["高等数学"].append(r.mastery_level)
-        elif kp_id.startswith("xd"):
-            subjects["线性代数"].append(r.mastery_level)
-        elif kp_id.startswith("gl"):
-            subjects["概率论与数理统计"].append(r.mastery_level)
+        name = kp_subject.get(r.knowledge_point_id)
+        if name in levels:
+            levels[name].append(r.mastery_level)
 
-    radar = {}
-    for name, levels in subjects.items():
-        radar[name] = round(sum(levels) / len(levels) * 100, 1) if levels else 0
-
+    radar = {
+        name: round(sum(v) / len(v) * 100, 1) if v else 0
+        for name, v in levels.items()
+    }
     return {"categories": list(radar.keys()), "values": list(radar.values())}
 
 
