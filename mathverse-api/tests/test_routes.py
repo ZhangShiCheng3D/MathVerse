@@ -46,6 +46,24 @@ def test_get_knowledge_graph():
     assert "subjects" in resp.json()
 
 
+def test_kg_stages_are_distinct():
+    # primary/junior/senior have their own curricula, not the kaoyan fallback.
+    for stage, prefix in (("senior", "sr-"), ("junior", "jr-"), ("primary-low", "pl-")):
+        kg = client.get(f"/api/learn/kg/{stage}").json()
+        assert kg.get("stage") == stage
+        assert kg["subjects"][0]["id"].startswith(prefix)
+
+
+def test_kg_cache_not_polluted_by_user(auth):
+    _, headers = auth
+    # Authenticated request injects mastery (into a copy)...
+    authed = client.get("/api/learn/kg/senior", headers=headers).json()
+    assert "mastery" in authed["subjects"][0]["chapters"][0]["topics"][0]
+    # ...the shared cache must stay pristine for an anonymous request.
+    anon = client.get("/api/learn/kg/senior").json()
+    assert "mastery" not in anon["subjects"][0]["chapters"][0]["topics"][0]
+
+
 # ─── questions ───
 
 def test_save_and_fetch_question(auth):

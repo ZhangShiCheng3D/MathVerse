@@ -1,0 +1,93 @@
+{
+  "version": "1.0",
+  "stage": "primary-high",
+  "name": "小学高段数学（4-6年级）",
+  "subjects": [
+    {
+      "id": "ph-num",
+      "name": "数与运算",
+      "chapters": [
+        {
+          "id": "ph-num-1",
+          "name": "整数与运算",
+          "frequency": "high",
+          "topics": [
+            {"id": "ph-num-1.1", "name": "多位数的认识", "difficulty": 2},
+            {"id": "ph-num-1.2", "name": "三位数乘两位数", "difficulty": 3},
+            {"id": "ph-num-1.3", "name": "除数是两位数的除法", "difficulty": 3},
+            {"id": "ph-num-1.4", "name": "因数与倍数", "difficulty": 3}
+          ]
+        },
+        {
+          "id": "ph-num-2",
+          "name": "分数与小数",
+          "frequency": "high",
+          "topics": [
+            {"id": "ph-num-2.1", "name": "小数的认识与加减", "difficulty": 3},
+            {"id": "ph-num-2.2", "name": "小数乘除法", "difficulty": 4},
+            {"id": "ph-num-2.3", "name": "分数的意义与性质", "difficulty": 3},
+            {"id": "ph-num-2.4", "name": "分数四则运算", "difficulty": 4}
+          ]
+        },
+        {
+          "id": "ph-num-3",
+          "name": "四则混合与简便运算",
+          "frequency": "high",
+          "topics": [
+            {"id": "ph-num-3.1", "name": "四则混合运算", "difficulty": 3},
+            {"id": "ph-num-3.2", "name": "运算定律与简便计算", "difficulty": 4}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph-alg",
+      "name": "代数初步",
+      "chapters": [
+        {
+          "id": "ph-alg-1",
+          "name": "式与方程、比例",
+          "frequency": "high",
+          "topics": [
+            {"id": "ph-alg-1.1", "name": "用字母表示数", "difficulty": 3},
+            {"id": "ph-alg-1.2", "name": "简易方程", "difficulty": 4},
+            {"id": "ph-alg-1.3", "name": "比和比例", "difficulty": 4},
+            {"id": "ph-alg-1.4", "name": "正反比例", "difficulty": 4}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph-geo",
+      "name": "图形与几何",
+      "chapters": [
+        {
+          "id": "ph-geo-1",
+          "name": "面积与体积",
+          "frequency": "high",
+          "topics": [
+            {"id": "ph-geo-1.1", "name": "平行四边形、三角形、梯形面积", "difficulty": 3},
+            {"id": "ph-geo-1.2", "name": "圆的周长与面积", "difficulty": 4},
+            {"id": "ph-geo-1.3", "name": "长方体与正方体的表面积与体积", "difficulty": 4},
+            {"id": "ph-geo-1.4", "name": "圆柱与圆锥", "difficulty": 5}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ph-stat",
+      "name": "统计与可能性",
+      "chapters": [
+        {
+          "id": "ph-stat-1",
+          "name": "统计",
+          "frequency": "medium",
+          "topics": [
+            {"id": "ph-stat-1.1", "name": "条形、折线、扇形统计图", "difficulty": 3},
+            {"id": "ph-stat-1.2", "name": "平均数与可能性", "difficulty": 3}
+          ]
+        }
+      ]
+    }
+  ]
+}

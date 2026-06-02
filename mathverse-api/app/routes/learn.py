@@ -1,4 +1,5 @@
 """学习 API routes — knowledge graph, lectures, exercises."""
+import copy
 import json
 import os
 import re
@@ -38,8 +39,11 @@ async def get_knowledge_graph(
     """Get knowledge graph for a stage, with user mastery data."""
     kg = _load_kg(stage)
 
-    # Inject user mastery data if available
+    # Inject user mastery data if available. Deep-copy first so the per-user
+    # mastery never mutates the shared cache (else a logged-out request would
+    # leak the previous user's mastery).
     if user:
+        kg = copy.deepcopy(kg)
         records = db.query(LearningProgress).filter(
             LearningProgress.user_id == user.id
         ).all()
