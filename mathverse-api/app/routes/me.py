@@ -68,6 +68,50 @@ async def get_radar(user: User = Depends(get_current_user), db: Session = Depend
     return {"categories": list(radar.keys()), "values": list(radar.values())}
 
 
+# ─── Profile ───
+
+_STAGES = {"primary-low", "primary-high", "junior", "senior", "college", "kaoyan"}
+_EXAM_MODES = {"math-1", "math-2", "math-3"}
+
+
+class ProfileUpdate(BaseModel):
+    current_stage: str | None = None
+    exam_mode: str | None = None
+    nickname: str | None = None
+
+
+@router.patch("/profile")
+async def update_profile(
+    data: ProfileUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update the learner's stage / exam mode / nickname."""
+    if data.current_stage is not None:
+        if data.current_stage not in _STAGES:
+            raise HTTPException(400, "无效的学段")
+        user.current_stage = data.current_stage
+    if data.exam_mode is not None:
+        if data.exam_mode and data.exam_mode not in _EXAM_MODES:
+            raise HTTPException(400, "无效的考试类型")
+        user.exam_mode = data.exam_mode or None
+    if data.nickname is not None:
+        nn = data.nickname.strip()
+        if nn:
+            user.nickname = nn[:20]
+    db.commit()
+    db.refresh(user)
+    return {
+        "id": user.id,
+        "nickname": user.nickname,
+        "avatar_url": user.avatar_url,
+        "current_stage": user.current_stage,
+        "exam_mode": user.exam_mode,
+        "tier": user.tier,
+        "streak_days": user.streak_days,
+    }
+
+
 # ─── Mistakes ───
 
 class MistakeCreate(BaseModel):
