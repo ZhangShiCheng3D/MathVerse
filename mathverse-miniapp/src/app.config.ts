@@ -8,6 +8,7 @@ export default defineAppConfig({
     'pages/plan/index',
     'pages/score/index',
     'pages/membership/index',
+    'pages/login/index',
   ],
   tabBar: {
     color: '#8b8fa6',

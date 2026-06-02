@@ -1,4 +1,5 @@
-"""Authentication routes — WeChat OAuth + JWT."""
+"""Authentication routes — WeChat OAuth + phone/SMS + JWT."""
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.all import User
+from app.services import sms
 from app.services.analytics import log_event
 from app.middleware.auth_middleware import (
     create_access_token,
@@ -174,6 +176,65 @@ async def wechat_mp_login(req: MpLoginRequest, db: Session = Depends(get_db)):
         db.refresh(user)
 
     log_event(db, "login", user.id, {"channel": "wechat_mp"})
+    return {
+        "access_token": create_access_token(user.id),
+        "refresh_token": create_refresh_token(user.id),
+        "user": {
+            "id": user.id,
+            "nickname": user.nickname,
+            "avatar_url": user.avatar_url,
+            "current_stage": user.current_stage,
+            "exam_mode": user.exam_mode,
+            "tier": user.tier,
+            "streak_days": user.streak_days,
+        },
+    }
+
+
+_PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
+
+
+class SmsSendRequest(BaseModel):
+    phone: str
+
+
+class SmsVerifyRequest(BaseModel):
+    phone: str
+    code: str
+
+
+@router.post("/sms/send")
+async def sms_send(req: SmsSendRequest, db: Session = Depends(get_db)):
+    """Send a login OTP to a China mobile number."""
+    if not _PHONE_RE.match(req.phone):
+        raise HTTPException(400, "手机号格式不正确")
+    if not sms.can_resend(db, req.phone):
+        raise HTTPException(429, "验证码发送过于频繁，请稍后再试")
+    try:
+        code = sms.generate_and_store(db, req.phone)
+    except RuntimeError:
+        raise HTTPException(502, "短信发送失败，请稍后重试")
+    resp = {"sent": True}
+    if not settings.sms_enabled:
+        # Dev mode (no provider configured): surface the code so the flow works now.
+        resp["debug_code"] = code
+    return resp
+
+
+@router.post("/sms/verify")
+async def sms_verify(req: SmsVerifyRequest, db: Session = Depends(get_db)):
+    """Verify an OTP, find-or-create the user by phone, and issue JWTs."""
+    if not sms.verify(db, req.phone, req.code):
+        raise HTTPException(400, "验证码错误或已过期")
+
+    user = db.query(User).filter(User.phone == req.phone).first()
+    if not user:
+        user = User(phone=req.phone, nickname=f"用户{req.phone[-4:]}")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    log_event(db, "login", user.id, {"channel": "sms"})
     return {
         "access_token": create_access_token(user.id),
         "refresh_token": create_refresh_token(user.id),

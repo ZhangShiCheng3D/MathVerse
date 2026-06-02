@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">数界 MathVerse</string>
+    <string name="title_activity_main">数界 MathVerse</string>
+    <string name="package_name">cn.kuangyebar.mathverse</string>
+    <string name="custom_url_scheme">cn.kuangyebar.mathverse</string>
+</resources>
