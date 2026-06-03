@@ -215,7 +215,9 @@ P3_TAIL_METHOD = '''    async def _tail_foreign_turn(
         (P3 de-affinity). append_turn_event bumps turns.updated_at on every event,
         so a live turn stays fresh even mid-stream; only a turn whose owner died
         goes stale and is failed — the old orphan semantics, but by real staleness
-        instead of process-locality. (A proper owner heartbeat/lease is P3b.)
+        instead of process-locality. The owner also runs a periodic heartbeat
+        (touch_turn) in _run_turn, so even a long quiet step keeps updated_at fresh
+        and is NOT mistaken for a dead owner.
         """
         from deeptutor.services.session import _turn_bus as _bus
         if _bus.enabled():
@@ -377,7 +379,25 @@ RUN_SETUP_NEW = (
     "                            execution.task.cancel()\n"
     "                except Exception:\n"
     "                    pass\n"
-    "            _ctl_task = asyncio.create_task(_ctl_listener())"
+    "            _ctl_task = asyncio.create_task(_ctl_listener())\n"
+    "\n"
+    "        # P3 owner heartbeat: while we own a RUNNING turn, periodically bump its\n"
+    "        # updated_at so a foreign tailer's staleness check tracks real owner\n"
+    "        # liveness, not just event activity. Without this a long quiet step\n"
+    "        # (> the tailer's stale window with no streamed events) lets a non-owning\n"
+    "        # replica wrongly fail a turn still running here. PG-store only\n"
+    "        # (touch_turn); inert for the single-process SQLite default.\n"
+    "        _hb_task: asyncio.Task[None] | None = None\n"
+    '        _touch_turn = getattr(self.store, "touch_turn", None)\n'
+    "        if _touch_turn is not None:\n"
+    "            async def _heartbeat() -> None:\n"
+    "                try:\n"
+    "                    while True:\n"
+    "                        await asyncio.sleep(30)\n"
+    "                        await _touch_turn(turn_id)\n"
+    "                except Exception:\n"
+    "                    pass\n"
+    "            _hb_task = asyncio.create_task(_heartbeat())"
 )
 assert tr.count(RUN_SETUP_OLD) == 1, "turn_runtime _run_turn reply_queue setup anchor not found — upstream changed"
 tr = tr.replace(RUN_SETUP_OLD, RUN_SETUP_NEW)
@@ -394,6 +414,10 @@ RUN_FIN_NEW = (
     "                _ctl_task.cancel()\n"
     "                with contextlib.suppress(asyncio.CancelledError):\n"
     "                    await _ctl_task\n"
+    "            if _hb_task is not None:  # P3: stop the owner heartbeat\n"
+    "                _hb_task.cancel()\n"
+    "                with contextlib.suppress(asyncio.CancelledError):\n"
+    "                    await _hb_task\n"
     "            if llm_scope_token is not None and reset_active_llm_selection is not None:\n"
     "                reset_active_llm_selection(llm_scope_token)"
 )
@@ -401,6 +425,16 @@ assert tr.count(RUN_FIN_OLD) == 1, "turn_runtime _run_turn finally anchor not fo
 tr = tr.replace(RUN_FIN_OLD, RUN_FIN_NEW)
 
 open(tr_f, "w", encoding="utf-8").write(tr)
+
+# Build-time syntax gate: every patched/overlay .py file must still compile. Anchors
+# guarantee WHERE an edit lands; this guarantees the RESULT is valid Python — so a
+# bad generated block (indentation/syntax) or a drifted anchor that merged wrong
+# fails the BUILD loudly instead of shipping a module that ImportErrors at runtime.
+_py_targets = [agent_f, router_f, store_f, main_f, chat_router_f, tr_f]
+_py_targets += [p for p in overlay_copied if p.endswith(".py")]
+for _f in _py_targets:
+    with open(_f, encoding="utf-8") as _fh:
+        compile(_fh.read(), _f, "exec")
 
 print(
     f"patched ok: verbose removed, {count} vision construction site(s) updated, "

@@ -225,6 +225,26 @@ async def test_append_events_seq_and_after_seq(store):
     assert (await store.get_turn(tid))["last_seq"] == 2
 
 
+async def test_touch_turn_heartbeat_bumps_updated_at(store):
+    """Owner heartbeat (F1 fix): touch_turn bumps updated_at while running, and is
+    a no-op once terminal. Postgres-only — the SQLite default has no foreign tailer
+    to keep alive, so it doesn't implement it."""
+    import asyncio as _asyncio
+
+    if not hasattr(store, "touch_turn"):
+        pytest.skip("touch_turn is Postgres-only (owner liveness heartbeat)")
+    sid = _sid()
+    await store.create_session(session_id=sid)
+    tid = (await store.create_turn(sid))["id"]
+    before = (await store.get_turn(tid))["updated_at"]
+    await _asyncio.sleep(0.01)
+    assert await store.touch_turn(tid) is True
+    assert (await store.get_turn(tid))["updated_at"] >= before
+    # A terminal turn must not be revived by a heartbeat.
+    await store.update_turn_status(tid, "completed")
+    assert await store.touch_turn(tid) is False
+
+
 async def test_get_session_with_messages(store):
     sid = _sid()
     await store.create_session(session_id=sid)

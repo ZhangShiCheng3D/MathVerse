@@ -43,8 +43,9 @@ spec:
           args:
             - >
               mkdir -p /data/user/settings &&
+              { [ -f /data/user/settings/model_catalog.json ] ||
               sed "s/__LITELLM_MASTER_KEY__/$LITELLM_MASTER_KEY/g"
-              /seed/model_catalog.json > /data/user/settings/model_catalog.json
+              /seed/model_catalog.json > /data/user/settings/model_catalog.json ; }
           env:
             - name: LITELLM_MASTER_KEY
               valueFrom: { secretKeyRef: { name: app-secrets, key: LITELLM_MASTER_KEY } }
@@ -80,7 +81,8 @@ spec:
             limits: { cpu: "2", memory: 3Gi }   # tune to in-flight turns/worker
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: deeptutor-shared-data   # RWX so KB registry/docs/indexes are shared
         - name: seed
           configMap:
             name: deeptutor-model-catalog
@@ -108,8 +110,9 @@ spec:
           args:
             - >
               mkdir -p /data/user/settings &&
+              { [ -f /data/user/settings/model_catalog.json ] ||
               sed "s/__LITELLM_MASTER_KEY__/$LITELLM_MASTER_KEY/g"
-              /seed/model_catalog.json > /data/user/settings/model_catalog.json
+              /seed/model_catalog.json > /data/user/settings/model_catalog.json ; }
           env:
             - name: LITELLM_MASTER_KEY
               valueFrom: { secretKeyRef: { name: app-secrets, key: LITELLM_MASTER_KEY } }
@@ -139,7 +142,8 @@ spec:
             limits: { cpu: "1", memory: 2Gi }
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: deeptutor-shared-data   # RWX so KB registry/docs/indexes are shared
         - name: seed
           configMap:
             name: deeptutor-model-catalog

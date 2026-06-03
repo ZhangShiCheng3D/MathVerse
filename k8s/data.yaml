@@ -153,3 +153,27 @@ spec:
         resources:
           requests:
             storage: 20Gi
+---
+# Shared DeepTutor data for the web+bot replicas. DeepTutor keeps the RAG
+# knowledge-base REGISTRY (kb_config.json), uploaded raw docs and on-disk indexes
+# under /app/data — these are NOT in Postgres (only session/turn/event state is)
+# and NOT in qdrant (only vectors). With a per-pod emptyDir those files are
+# invisible across replicas, so a KB created on one replica 404s on another and
+# RAG-grounded solving breaks non-deterministically. A ReadWriteMany volume makes
+# /app/data shared so every replica sees the same knowledge bases.
+#
+# Requires an RWX-capable StorageClass (NFS / CephFS / EFS / Filestore). If your
+# cluster has none, route all KB-mutating + RAG requests to a single replica
+# instead (e.g. a dedicated role), or externalize the KB store.
+# Caveat: concurrent re-index of the SAME KB from two replicas can race on the
+# index files — KB writes are rare admin ops, but prefer to serialize them.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deeptutor-shared-data
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: REPLACE_ME_RWX_STORAGECLASS
+  resources:
+    requests:
+      storage: 20Gi

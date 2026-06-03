@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepTutor 高并发改造 — 补丁审计报告 (2026-06-03)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         line-height: 1.7; color: #1f2937; max-width: 980px; margin: 0 auto; padding: 32px 20px; }
+  h1 { color: #b91c1c; border-bottom: 3px solid #b91c1c; padding-bottom: 8px; }
+  h2 { color: #4338ca; margin-top: 34px; border-left: 4px solid #6366f1; padding-left: 10px; }
+  h3 { color: #374151; }
+  code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.9em; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef2ff; }
+  .sev-high { color: #b91c1c; font-weight: 700; }
+  .sev-med { color: #d97706; font-weight: 700; }
+  .sev-low { color: #2563eb; font-weight: 600; }
+  .fixed { color: #059669; font-weight: 600; }
+  .box { border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+  .box-r { background: #fef2f2; border: 1px solid #fecaca; }
+  .box-g { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .box-y { background: #fffbeb; border: 1px solid #fde68a; }
+</style>
+</head>
+<body>
+
+<h1>DeepTutor 高并发改造 —— 补丁审计报告</h1>
+<p><em>日期：2026-06-03 ｜ 范围：审计 PR #2 的「万级并发」补丁（<code>deeptutor-patch/</code> + <code>k8s/</code> + <code>gateway/</code>）的正确性。交付：只改代码 + 本地可跑测试，不部署。</em></p>
+
+<div class="box box-y">
+<strong>为什么做这次审计：</strong>PR #2 的高并发改造代码完整，但<strong>「仅静态验证、从未在真实环境跑过」</strong>。且 PR #15 新增的 <code>/ws/tutor</code> 让 MathVerse 首次依赖 DeepTutor「面 A」(turn runtime) 与 RAG 知识库，把这些路径的正确性从「可选」变成「必须」。本审计逐文件复核，找出只会在真实并发/多副本下暴露的 bug。
+</div>
+
+<h2>发现汇总</h2>
+<table>
+  <tr><th>ID</th><th>严重度</th><th>问题</th><th>状态</th></tr>
+  <tr><td>F1</td><td class="sev-high">高</td><td>非属主副本在 120s 无事件后误杀「活着但安静」的 turn（承诺的 owner heartbeat 从未实现）</td><td class="fixed">已修</td></tr>
+  <tr><td>G1</td><td class="sev-high">高</td><td>多副本下 RAG 知识库失效：KB 注册表/原文/索引在 per-pod <code>emptyDir</code>，不在 Postgres/qdrant，副本间不可见</td><td class="fixed">已修(清单)</td></tr>
+  <tr><td>F2</td><td class="sev-med">中</td><td>face-B 的 sync→async 桥无超时，PG 慢/不可达会阻塞 worker 主事件循环</td><td class="fixed">已修</td></tr>
+  <tr><td>F3a</td><td class="sev-low">低</td><td>Redis 控制消息有损：属主订阅前发的 reply/cancel 会丢（窗口极小）</td><td>记录</td></tr>
+  <tr><td>F3b</td><td class="sev-low">低/C4</td><td>补丁闭包假设 <code>execution</code>/<code>_track</code>/<code>self.store</code> 在上游作用域内——锚点只保证插入点</td><td>待引擎验证</td></tr>
+  <tr><td>G2</td><td class="sev-low">低/C4</td><td>LiteLLM <code>router_settings.redis_host: os.environ/...</code> 是否被解析依赖 LiteLLM 版本；未解析则限流退化为每副本本地</td><td>待引擎验证</td></tr>
+  <tr><td>G3</td><td class="sev-low">低</td><td>HPA 与 Deployment 同时写 <code>replicas</code>（apply 时短暂对账），mathverse-api <code>DATABASE_URL</code> 必须填托管 PG</td><td>已注释说明</td></tr>
+</table>
+
+<p>同时确认<strong>正确</strong>的关键设计：per-turn <code>pg_advisory_xact_lock</code> 做 seq、连接池替代 SQLite 全局锁、face-B 用独立后台 loop+独立池/锁、PK 函数依赖的 <code>GROUP BY</code>、<code>SessionStoreProtocol</code> 方法零遗漏、tail「先订阅后读 backlog + 按 seq 去重」、publish 最佳努力吞错、secret 键完整。</p>
+
+<h2>F1【高】非属主副本误杀活着的 turn</h2>
+<p><strong>问题：</strong>P3a 轮询（<code>turn_runtime._tail_foreign_turn</code>）与 P3b Redis（<code>_turn_bus.tail</code>）都让一个<strong>不拥有该 turn 的副本</strong>在 <code>stale_after=120s</code> 无新事件后把 <code>running</code> 标成 <code>failed</code>——即使属主副本还活着（一次 &gt;120s 无流式输出的慢工具/LLM 调用即触发）。过期判断只看事件活动（<code>updated_at</code> 仅在 <code>append_turn_event</code> 更新），而代码注释承诺的「owner heartbeat/lease (P3b)」<strong>从未实现</strong>。这正是 P3 本要消灭的跨副本误杀。</p>
+<p><strong>修复：</strong>引入真正的属主心跳。</p>
+<ul>
+  <li><code>postgres_store.py</code>：新增 <code>touch_turn(turn_id)</code>——仅当 <code>status='running'</code> 时 bump <code>updated_at</code>。</li>
+  <li><code>patch.py §9d/§9e</code>：属主在 <code>_run_turn</code> 期间每 30s 跑一次心跳 <code>touch_turn</code>（PG-only，<code>getattr</code> 守卫；<code>finally</code> 取消）。锚点不变，仅替换文本更丰富。</li>
+</ul>
+<p>于是 <code>updated_at</code> 成为<strong>真实存活信号</strong>，120s 过期判断只对真正死掉的属主生效。</p>
+
+<h2>G1【高】多副本下 RAG 知识库失效</h2>
+<p><strong>问题：</strong><code>k8s/deeptutor.yaml</code> 的 web 用 <code>replicas:3</code> + <code>/app/data</code> 为 per-pod <code>emptyDir</code>。但 DeepTutor 把 RAG 知识库的<strong>注册表 <code>kb_config.json</code>、上传原文、磁盘索引</strong>存在 <code>/app/data</code>——<strong>不在 Postgres</strong>（只有 session/turn/event 状态在）、<strong>不在 qdrant</strong>（只有向量在）。因此副本 A 建的 KB，副本 B 的 <code>kb_config.json</code> 里没有 → <code>/api/kb/list</code> 与 RAG 解题在 B 上 404/落空，<strong>非确定性地坏掉</strong>。直接影响 PR #15 的 <code>/api/kb/*</code> 与 RAG-grounded 解题。</p>
+<p><strong>修复（清单层）：</strong>给 web+bot 挂一个 <strong>ReadWriteMany</strong> 共享卷到 <code>/app/data</code>，所有副本看到同一套知识库；initContainer 改为幂等写入 <code>model_catalog.json</code>。</p>
+<pre>k8s/data.yaml:      + PersistentVolumeClaim deeptutor-shared-data (RWX)
+k8s/deeptutor.yaml: data 卷 emptyDir -> PVC（web+bot）；seed 改 [ -f ] || ... 幂等</pre>
+<div class="box box-r">
+<strong>前置要求：</strong>需要 RWX-capable StorageClass（NFS / CephFS / EFS / Filestore），填 <code>REPLACE_ME_RWX_STORAGECLASS</code>。若集群无 RWX：把所有 KB 写操作 + RAG 请求路由到单一副本，或外置 KB 存储。<strong>残留：</strong>两副本并发重建<em>同一</em> KB 索引可能竞争文件——KB 写是低频管理操作，建议串行化。
+</div>
+
+<h2>F2【中】sync→async 桥阻塞 worker 主循环</h2>
+<p><strong>问题：</strong><code>_pg_session_manager</code> 的 <code>run_coroutine_threadsafe(...).result()</code> 无超时，由 chat.py 在 worker 主事件循环上<strong>同步</strong>调用。PG 慢/不可达时主循环被无限期阻塞 → 整个 worker 停摆（与高并发目标相悖，单次 PG 抖动变成 worker 吊死）。</p>
+<p><strong>修复：</strong><code>result(timeout=DEEPTUTOR_PG_BRIDGE_TIMEOUT，默认30s)</code>，超时抛错（chat.py 转成错误事件，而非吊死 worker）；并给连接池加 <code>command_timeout=30</code> 做纵深防御。</p>
+
+<h2>改动文件 &amp; 测试</h2>
+<table>
+  <tr><th>文件</th><th>改动</th></tr>
+  <tr><td><code>deeptutor-patch/overlay/.../postgres_store.py</code></td><td>+<code>touch_turn</code> 心跳；+<code>command_timeout</code></td></tr>
+  <tr><td><code>deeptutor-patch/overlay/.../_pg_session_manager.py</code></td><td>桥超时（<code>DEEPTUTOR_PG_BRIDGE_TIMEOUT</code>），不再吊死主循环</td></tr>
+  <tr><td><code>deeptutor-patch/patch.py</code></td><td>§9d/§9e 加属主心跳任务；修正过时注释</td></tr>
+  <tr><td><code>k8s/data.yaml</code> · <code>k8s/deeptutor.yaml</code></td><td>RWX 共享卷修 G1；幂等 seed</td></tr>
+  <tr><td><strong><code>deeptutor-patch/tests/test_turn_bus_unit.py</code>（新）</strong></td><td><strong>5 个本地测试</strong>（无需 Redis/PG/镜像，importlib+fakes+假时钟）：活着的 turn 不被杀 / 真过期才失败 / done 终止 / seq 去重 / publish 吞错</td></tr>
+  <tr><td><code>deeptutor-patch/tests/test_session_store_parity.py</code></td><td>+<code>touch_turn</code> 契约测试（PG-only，本地自动跳过）</td></tr>
+</table>
+
+<div class="box box-g">
+<strong>验证：</strong><code>pytest deeptutor-patch/tests/test_turn_bus_unit.py</code> → <strong>5 passed</strong>（本地）。4 个 overlay/补丁文件 + 2 个测试文件 <code>py_compile</code> 通过；2 个改过的 k8s 清单 <code>yaml.safe_load_all</code> 解析通过。<br>
+<strong>诚实边界：</strong>F1 的心跳注入上游 <code>turn_runtime._run_turn</code>（本地无法运行该函数），属<strong>静态验证</strong>，其效果由 turn-bus 过期测试间接证明；<code>_pg_session_manager</code> 与 <code>_turn_bus</code> 逻辑为<strong>直接本地测试</strong>。默认（开关全关）部署行为完全不变——心跳仅 PG 模式、桥超时仅 PG-backed chat 生效。
+</div>
+
+<h2>仍需在真实环境确认（C4，按 runbook）</h2>
+<ol>
+  <li><strong>F3b：</strong>构建镜像后做一次 import/smoke，确认 <code>execution</code>/<code>_track</code>/<code>self.store</code> 在上游 <code>_run_turn</code>/<code>subscribe_turn</code> 作用域内（py_compile 抓不到运行期 NameError；当前若不在作用域，转发会被 <code>except: pass</code> 静默吞掉）。</li>
+  <li><strong>G2：</strong>确认你的 LiteLLM 版本会解析 <code>router_settings.redis_host: os.environ/REDIS_HOST</code>；否则改成字面值或换字段，确保 ≥2 网关副本时限流全局生效。</li>
+  <li><strong>F1：</strong>多副本下跑一个 &gt;120s 无流式输出的 turn，确认心跳令其不被误杀；并跑 k6 压测量并发上限。</li>
+  <li><strong>G1：</strong>挂上 RWX 卷后，在副本 A 建 KB、确认副本 B 的 <code>/api/kb/list</code> 能看到并能 RAG 命中。</li>
+</ol>
+
+</body>
+</html>
