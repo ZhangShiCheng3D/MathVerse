@@ -10,6 +10,13 @@ export default defineAppConfig({
     'pages/membership/index',
     'pages/login/index',
     'pages/settings/index',
+    'pages/kb/index',
+    'pages/tutor/index',
+    'pages/visualize/index',
+    'pages/notebook/index',
+    'pages/activity/index',
+    'pages/memory/index',
+    'pages/book/index',
   ],
   tabBar: {
     color: '#8b8fa6',

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MathVerse × DeepTutor 全能力接入 — 交付说明 (2026-06-03)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         line-height: 1.7; color: #1f2937; max-width: 960px; margin: 0 auto; padding: 32px 20px; }
+  h1 { color: #4F46E5; border-bottom: 3px solid #4F46E5; padding-bottom: 8px; }
+  h2 { color: #4338ca; margin-top: 36px; border-left: 4px solid #6366f1; padding-left: 10px; }
+  h3 { color: #374151; margin-top: 22px; }
+  code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; font-size: 0.92em; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 8px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 0.93em; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #eef2ff; }
+  .ok { color: #059669; font-weight: 600; }
+  .defer { color: #d97706; font-weight: 600; }
+  .danger { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px 16px; }
+  .danger strong { color: #b91c1c; }
+  .note { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 5px; font-size: 0.8em; }
+  .tag-ws { background: #dbeafe; color: #1e40af; }
+  .tag-rest { background: #fef9c3; color: #854d0e; }
+</style>
+</head>
+<body>
+
+<h1>数界 MathVerse × DeepTutor —— 全能力系统性接入交付说明</h1>
+<p><em>日期：2026-06-03 ｜ 范围：把 DeepTutor 引擎的全部能力系统性接入 MathVerse（面向 App），分 6 个阶段交付。</em></p>
+
+<h2>1. 背景：为什么做这次重构</h2>
+<p>重构前，MathVerse 严重<strong>欠用</strong>了 DeepTutor 这台强大的引擎，只调用了一个端点 <code>/api/v1/chat</code>，且存在三处根本问题：</p>
+<ul>
+  <li>传给引擎的 <code>mode</code> 参数（solve/quiz/research/visualize）<strong>引擎根本不读</strong>（<code>chat.py</code> 只读 <code>message/session_id/history/kb_name/enable_rag/enable_web_search/language</code>）——所谓「5 种模式」是幻觉。</li>
+  <li>「一个 flag 就能开」的 <strong>RAG</strong>（<code>enable_rag</code>+<code>kb_name</code>）与<strong>联网检索</strong>（<code>enable_web_search</code>）从未被设置。</li>
+  <li>DeepTutor 的智能体核心 <code>/api/v1/ws</code>（unified_ws turn runtime）<strong>完全没碰</strong>；拍照解题、判题等原生能力线上<strong>全部绕过</strong>（直连 DashScope / DeepSeek）。</li>
+</ul>
+
+<h2>2. 交付总览（P0–P6）</h2>
+<table>
+  <tr><th>阶段</th><th>内容</th><th>状态</th></tr>
+  <tr><td>P0</td><td>客户端基座：<code>app/services/deeptutor/</code> 分层包（turn runtime 客户端、REST transport、租户命名）；<code>chat</code> 增加 RAG/web 参数</td><td class="ok">✅</td></tr>
+  <tr><td>P1</td><td>彻底替换绕过路径：拍照/判题/追问/出相似题全部改走 DeepTutor；删除 <code>vision.py</code>；DeepSeek 仅作熔断降级兜底</td><td class="ok">✅</td></tr>
+  <tr><td>P2</td><td>RAG 知识库管线：<code>/api/kb/*</code> + 静态知识图谱种子库 + RAG 参数贯穿 solve（含流式）</td><td class="ok">✅</td></tr>
+  <tr><td>P3</td><td>智能体导师：<code>WS /ws/tutor</code> 双向代理 turn runtime（含 ask_user 交互回路）+ 前端 AI 导师页</td><td class="ok">✅</td></tr>
+  <tr><td>P4</td><td>几何可视化：<code>/api/solve/visualize</code>（图→GeoGebra）；research/visualize 推理经 AI 导师页可用</td><td class="ok">✅</td></tr>
+  <tr><td>P5</td><td>有状态生产力套件：旗舰 <strong>笔记本</strong> 端到端 + 可复用的 C2 租户隔离基座（<code>DtResource</code> 归属表）</td><td class="ok">✅（其余域见 §6）</td></tr>
+  <tr><td>P6</td><td>收尾：清理、analytics 事件、本交付文档</td><td class="ok">✅</td></tr>
+</table>
+
+<h2>3. 架构</h2>
+<h3>后端：分层客户端包 <code>app/services/deeptutor/</code></h3>
+<ul>
+  <li><code>transport.py</code> — 通用 REST 客户端（httpx），错误归一为 <code>RestError</code>。</li>
+  <li><code>turn.py</code> — <strong>unified_ws turn runtime 客户端</strong>（<code>TurnConnection</code>）：start/subscribe/submit_reply/cancel/regenerate；按 <code>metadata.turn_terminal</code> 判终止。</li>
+  <li><code>rest.py</code> — 按域分组的管理端点客户端（knowledge / notebook / vision-analyze …）。</li>
+  <li><code>tenancy.py</code> — <code>scope(uid, name)</code> 命名隔离（<code>mv_{uid}_{name}</code>）。</li>
+  <li><code>kb_seed.py</code> — 用静态知识图谱生成 RAG 种子文档。</li>
+  <li>原 <code>agent_client.py</code> 保留并扩展（vision_solve / judge / explain_step / similar_question / visualize / RAG 参数），所有调用经 <code>CircuitBreaker</code> + admission 闸。</li>
+</ul>
+
+<h3>BFF 路由（均 <code>/api/*</code>，复用 quota / auth / content_filter / archive / analytics）</h3>
+<p>新增：<code>kb</code>（知识库）、<code>tutor</code>（<code>WS /ws/tutor</code>）、<code>notebook</code>；扩展 <code>solve</code>（visualize + RAG 参数）/<code>learn</code>（judge 判题）。</p>
+
+<h3>前端（Taro App）</h3>
+<p>新增能力页（detail 页 + 首页入口，<strong>未占用 tab 图标</strong>以降风险）：AI 导师、几何可视化、知识库、笔记本。WS 能力复用 <code>solve.ts</code> 的 <code>Taro.connectSocket</code>（h5 返回 Promise 需 await）范式。</p>
+
+<h2>4. 能力 → 端点 → 状态</h2>
+<table>
+  <tr><th>能力</th><th>DeepTutor 端点</th><th>形态</th><th>状态</th></tr>
+  <tr><td>chat + RAG + 联网</td><td>/api/v1/chat</td><td><span class="tag tag-ws">WS</span></td><td class="ok">已接（RAG 参数贯穿 solve）</td></tr>
+  <tr><td>拍照/文本解题</td><td>/api/v1/vision/solve</td><td><span class="tag tag-ws">WS</span></td><td class="ok">已替换绕过路径</td></tr>
+  <tr><td>判题（多模态）</td><td>/api/v1/question/judge</td><td><span class="tag tag-ws">WS</span></td><td class="ok">已替换绕过路径</td></tr>
+  <tr><td>智能体 turn runtime</td><td>/api/v1/ws</td><td><span class="tag tag-ws">WS</span></td><td class="ok">已接（AI 导师，含 ask_user）</td></tr>
+  <tr><td>图→GeoGebra 可视化</td><td>/api/v1/vision/analyze</td><td><span class="tag tag-rest">REST</span></td><td class="ok">已接</td></tr>
+  <tr><td>知识库 RAG</td><td>/api/v1/knowledge/*</td><td><span class="tag tag-rest">REST</span></td><td class="ok">已接（命名隔离）</td></tr>
+  <tr><td>笔记本</td><td>/api/v1/notebook/*</td><td><span class="tag tag-rest">REST</span></td><td class="ok">已接（DtResource 归属隔离）</td></tr>
+  <tr><td>KB-grounded 出题</td><td>/api/v1/{generate,mimic}</td><td><span class="tag tag-ws">WS</span></td><td class="defer">暂缓（见 §6）</td></tr>
+  <tr><td>AI 教材 / 协作写作 / 三层记忆 / 活动流 / 导师 Bot</td><td>book / co_writer / memory / dashboard / tutorbot</td><td><span class="tag tag-rest">REST</span></td><td class="defer">暂缓（见 §6）</td></tr>
+</table>
+
+<h2>5. 多租户隔离（C2 —— 最关键的正确性设计）</h2>
+<p>DeepTutor 以 <code>ENABLE_AUTH=false</code> 运行，是<strong>单租户</strong>：sessions / 知识库 / 笔记本等都存在它自己的单一数据空间。MathVerse 是多用户的，因此采用两套隔离：</p>
+<ul>
+  <li><strong>命名隔离</strong>（MathVerse 控制名字的资源：kb_name、session_id）：一律加 <code>mv_{uid}_</code> 前缀，uid 来自 JWT 而非用户输入，故仅靠前缀即可隔离。共享只读课程库为 <code>mv_curriculum_{stage}</code>。</li>
+  <li><strong>归属表隔离</strong>（DeepTutor <em>服务端生成 id</em> 的资源：notebook/book…）：靠前缀无法隔离（id 非我方命名，且可被直接枚举访问）。改为在 MathVerse 侧建 <code>DtResource</code>（user↔domain↔dt_id）映射表，<code>list</code> 按归属过滤、所有按 id 的操作校验归属。该机制由 <code>app/services/dt_ownership.py</code> 提供，是所有服务端 id 域的通用方案。</li>
+</ul>
+<p>已通过单测验证：用户 A 看不到 / 无法 get / delete 用户 B 的笔记本（引擎请求都不会发出）。</p>
+
+<div class="danger">
+<h2 style="border:none;color:#b91c1c;margin-top:0;">⚠️ 6'. 部署红线（C3 —— 务必遵守）</h2>
+<p>本次首次让 MathVerse 依赖 DeepTutor「<strong>面 A</strong>」（turn runtime，<code>/api/v1/ws</code>，由 <code>/ws/tutor</code> 使用）。</p>
+<p><strong>切勿在未设置 <code>DEEPTUTOR_PG_DSN</code> 的情况下把 DeepTutor 的 <code>WEB_CONCURRENCY</code> 提到 &gt;1 或增加副本。</strong>否则 <code>turn_runtime</code> 会把跨 worker/副本的 turn 误判为 orphan 并<strong>杀掉</strong>（即 PR #2 的 P3a/P3b 修复项）。单 worker 下不受影响。</p>
+</div>
+
+<h2>6. 暂缓项与理由（避免投机性代码）</h2>
+<p>以下能力<strong>未在本轮强行接入</strong>，因为会产生无法验证、依赖外部条件的投机代码（违背「简洁至上」）。它们都可沿用本轮已建好的模式（REST 透传 + <code>DtResource</code> 归属隔离）增量补齐：</p>
+<ul>
+  <li><strong>KB-grounded 出题</strong>（<code>question/generate</code>、<code>mimic</code>）：默认依赖一个<em>已填充语料</em>的知识库，且事件结构不确定；当前「先搭管线、暂无语料」。现有 chat+JSON 出题（<code>generate_quiz</code>）已覆盖该功能，待真实教材语料灌入共享课程库后再切换。</li>
+  <li><strong>AI 教材 (book) / 三层记忆 (memory) / 活动流 (dashboard)</strong>：与笔记本同属有状态域，可用 <code>DtResource</code> 模式补 BFF + 前端页；本轮优先交付与数学学习闭环最相关的笔记本。</li>
+  <li><strong>协作写作 (co_writer) / 导师 Bot (tutorbot souls)</strong>：对考试数学场景价值较低；tutorbot souls 属全局态，租户隔离需额外设计。建议按需再评估。</li>
+</ul>
+
+<h2>7. 验证状态</h2>
+<ul>
+  <li><strong>后端</strong>：<code>pytest</code> <span class="ok">123 passed</span>（原 95 + 新增，现有测试零破坏）。</li>
+  <li><strong>前端</strong>：<code>vitest</code> <span class="ok">14 passed</span>；<code>build:h5</code> <span class="ok">构建通过</span>（App 包可出）。</li>
+  <li><strong>契约</strong>：所有新接端点的请求字段/响应事件均对照上游 <code>HKUDS/DeepTutor</code> <code>deeptutor/api/routers/*</code> 源码核对（C4）。</li>
+  <li class="defer"><strong>未做</strong>：与真实引擎的端到端联调与部署，由运维按 runbook 自行执行（沿用 PR #2「static-verified only」约定）。turn runtime 的事件细节（如 <code>ask_user</code> 的确切事件名）需在真实引擎上最终确认。</li>
+</ul>
+
+<div class="note">
+<strong>落地建议（联调顺序）：</strong>本地 <code>docker-compose</code> 起全栈 → 先验 P1（拍照/判题）→ P2（<code>POST /api/kb/curriculum/{stage}/seed</code> 后用 <code>use_rag=true</code> 解题）→ P3（<code>/ws/tutor</code> 多轮 + 研究/可视化 capability）→ P4（<code>/api/solve/visualize</code>）→ P5（笔记本 CRUD）。注意 §6' 的并发红线。
+</div>
+
+</body>
+</html>

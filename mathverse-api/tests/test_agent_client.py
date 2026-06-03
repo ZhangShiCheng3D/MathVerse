@@ -147,6 +147,53 @@ async def test_admission_gate_releases_slot_after_call():
     assert client._inflight._value == 1  # slot returned
 
 
+@pytest.mark.asyncio
+async def test_vision_solve_delegates_to_ws():
+    """Photo solve now goes through DeepTutor's vision WS, not DashScope."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.vision_solve", new_callable=AsyncMock) as m:
+        m.return_value = {"answer": "x=1"}
+        assert await client.vision_solve("解题", "BASE64") == "x=1"
+        assert m.call_args.kwargs["image_base64"] == "BASE64"
+
+
+@pytest.mark.asyncio
+async def test_judge_returns_feedback():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.judge", new_callable=AsyncMock) as m:
+        m.return_value = {"feedback": "✅ 正确"}
+        assert await client.judge("2*2=?", "4", correct_answer="4") == "✅ 正确"
+
+
+@pytest.mark.asyncio
+async def test_explain_and_similar_use_chat_ws():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as m:
+        m.return_value = {"answer": "因为...", "session_id": None, "statuses": []}
+        assert await client.explain_step("题背景", "这一步") == "因为..."
+        assert m.call_args.kwargs["mode"] == "chat"
+        assert await client.similar_question("原题", "gs-1.1") == "因为..."
+
+
+@pytest.mark.asyncio
+async def test_visualize_wraps_base64_and_delegates(monkeypatch):
+    """Image is normalized to a data URI before hitting /vision/analyze."""
+    from app.services.deeptutor import rest
+    client = AgentClient("http://mock:8001")
+    captured = {}
+
+    async def fake(question, image_base64=None, image_url=None, session_id=None):
+        captured["q"] = question
+        captured["img"] = image_base64
+        return {"final_ggb_commands": [], "ggb_script": None}
+
+    monkeypatch.setattr(rest, "vision_analyze", fake)
+    out = await client.visualize("画三角形", "iVBORabc")
+    assert captured["q"] == "画三角形"
+    assert captured["img"].startswith("data:image/png;base64,")
+    assert "final_ggb_commands" in out
+
+
 def test_solve_result_dataclass():
     result = SolveResult(
         status="success",

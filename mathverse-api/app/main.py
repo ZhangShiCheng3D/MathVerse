@@ -4,7 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings, DEFAULT_JWT_SECRET
 from app.database import init_db
-from app.routes import auth, learn, me, pay, questions, solve, solve_ws
+from app.routes import (
+    auth, learn, me, pay, questions, solve, solve_ws, kb, tutor, notebook, dashboard,
+    memory, book,
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +35,12 @@ app.include_router(pay.router)
 app.include_router(questions.router)
 app.include_router(solve.router)
 app.include_router(solve_ws.ws_router)
+app.include_router(kb.router)
+app.include_router(tutor.ws_router)
+app.include_router(notebook.router)
+app.include_router(dashboard.router)
+app.include_router(memory.router)
+app.include_router(book.router)
 
 @app.get("/api/health")
 async def health():

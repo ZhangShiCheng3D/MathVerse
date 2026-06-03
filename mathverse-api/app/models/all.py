@@ -126,3 +126,20 @@ class AnalyticsEvent(Base):
     event = Column(String, nullable=False, index=True)
     properties = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=_now)
+
+class DtResource(Base):
+    """Ownership map: MathVerse user ↔ a DeepTutor server-generated resource id.
+
+    DeepTutor (ENABLE_AUTH=false) is single-tenant and assigns its own ids to
+    notebooks/books/etc., which can't be namespaced by a name prefix. We record
+    ownership here and enforce it on every id-based op so a user only ever sees
+    or touches their own resources (the C2 tenancy fix for server-ID'd domains).
+    """
+    __tablename__ = "dt_resources"
+    id = Column(String, primary_key=True, default=_new_id)
+    user_id = Column(String, nullable=False, index=True)
+    domain = Column(String, nullable=False)   # "notebook" | "book" | ...
+    dt_id = Column(String, nullable=False)     # DeepTutor's resource id
+    title = Column(String, default="")
+    created_at = Column(DateTime, default=_now)
+    __table_args__ = (Index("idx_dt_res_owner", "user_id", "domain"),)

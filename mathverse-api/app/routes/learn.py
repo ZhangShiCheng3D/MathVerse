@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.middleware.auth_middleware import get_optional_user, get_current_user
 from app.models.all import User, LearningProgress
 from app.services.agent_client import agent_client, AgentUnavailableError
-from app.services import deepseek
 from app.services.kg import load_kg
 from app.services.progress import record_attempt
 from app.services.analytics import log_event
@@ -104,13 +103,17 @@ async def grade_exercise(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Grade a user's answer to a practice question and update mastery."""
-    reference = f"参考答案：{req.reference_answer}\n" if req.reference_answer else ""
-    raw = await deepseek.chat(
-        '你是数学阅卷老师。判断学生答案是否正确，只输出 JSON：'
-        '{"correct": true 或 false, "feedback": "简短点评，50字内"}。不要输出多余内容。',
-        f"题目：{req.question}\n学生答案：{req.user_answer}\n{reference}请判分。",
-    )
+    """Grade a user's answer to a practice question and update mastery.
+
+    Judging now goes through DeepTutor's question/judge WS (was a DeepSeek-direct
+    bypass). The engine returns prose feedback; _parse_grade derives correctness.
+    """
+    try:
+        raw = await agent_client.judge(
+            req.question, req.user_answer, correct_answer=req.reference_answer
+        )
+    except AgentUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"判题服务暂时不可用: {e}")
     verdict = _parse_grade(raw)
     record_attempt(db, user.id, req.kp_id, verdict["correct"])
     log_event(db, "exercise_graded", user.id, {"kp": req.kp_id, "correct": verdict["correct"]})

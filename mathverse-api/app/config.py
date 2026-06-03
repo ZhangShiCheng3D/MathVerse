@@ -17,11 +17,18 @@ class Settings(BaseSettings):
     # surge sheds onto the DeepSeek degrade path instead of overloading the engine.
     deeptutor_max_concurrency: int = 64
     deeptutor_admission_timeout: float = 8.0
+    # Full-engine integration knobs. RAG is enabled per-request when a knowledge
+    # base name is supplied; this is the optional default KB for grounded
+    # solve/chat, and a global toggle for DuckDuckGo web search.
+    deeptutor_default_kb: str = ""
+    deeptutor_enable_web_search: bool = False
+    # DeepTutor's long-term memory is a SINGLE GLOBAL workbench (fixed-enum doc
+    # keys, no per-user dimension), so it can't be tenant-isolated by naming.
+    # Exposed only as a READ-ONLY shared inspector and OFF by default — flip to
+    # true only if an operator accepts that all users see the same engine memory.
+    deeptutor_memory_enabled: bool = False
     deepseek_api_key: str = ""
     qwen_api_key: str = ""
-    # DashScope (Alibaba) — multimodal vision for photo-solving (qwen-vl).
-    dashscope_api_key: str = ""
-    vision_model: str = "qwen-vl-max"
     math_ocr_api_key: str = ""
     wechat_app_id: str = ""
     wechat_app_secret: str = ""
