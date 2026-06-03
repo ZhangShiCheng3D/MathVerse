@@ -17,6 +17,7 @@ class _FakeConn:
     """Stand-in for deeptutor.turn.TurnConnection. Records the start args and
     pauses on ask_user until submit_reply is called."""
     last_start: dict | None = None
+    last_regen: dict | None = None
 
     def __init__(self, *a, **k):
         self._reply = asyncio.Event()
@@ -30,6 +31,9 @@ class _FakeConn:
 
     async def start_turn(self, message, **kw):
         _FakeConn.last_start = {"message": message, **kw}
+
+    async def regenerate(self, session_id, overrides=None):
+        _FakeConn.last_regen = {"session_id": session_id, "overrides": overrides}
 
     async def submit_reply(self, turn_id, *, text=None, answers=None):
         self.replies.append((turn_id, text))
@@ -69,6 +73,28 @@ def test_tutor_ask_user_roundtrip(monkeypatch):
     # capability was forwarded and an anonymous turn got a scoped session id
     assert _FakeConn.last_start["capability"] == "solve"
     assert _FakeConn.last_start["session_id"].startswith("mv_anon_")
+
+
+def test_tutor_regenerate_reruns_session(monkeypatch):
+    monkeypatch.setattr("app.routes.tutor.TurnConnection", _FakeConn)
+    _FakeConn.last_regen = None
+    with client.websocket_connect("/ws/tutor") as ws:
+        ws.send_json({"type": "regenerate", "session_id": "sess123"})
+        assert ws.receive_json()["type"] == "stream"
+        assert ws.receive_json()["type"] == "ask_user"
+        ws.send_json({"type": "reply", "text": "ok"})
+        assert ws.receive_json()["type"] == "result"
+        assert ws.receive_json()["type"] == "done"
+    # regenerate was forwarded against the tenancy-scoped session (not start_turn)
+    assert _FakeConn.last_regen is not None
+    assert _FakeConn.last_regen["session_id"].startswith("mv_anon_")
+
+
+def test_tutor_regenerate_requires_session(monkeypatch):
+    monkeypatch.setattr("app.routes.tutor.TurnConnection", _FakeConn)
+    with client.websocket_connect("/ws/tutor") as ws:
+        ws.send_json({"type": "regenerate"})
+        assert ws.receive_json()["type"] == "error"
 
 
 def test_tutor_unknown_capability_falls_back_to_chat(monkeypatch):

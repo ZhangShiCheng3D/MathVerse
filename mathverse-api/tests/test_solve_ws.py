@@ -8,7 +8,7 @@ client = TestClient(app)
 
 
 def test_solve_stream_emits_chunks_then_result(monkeypatch):
-    async def fake_stream(question, stage, *, kb_name=None, enable_rag=False):
+    async def fake_stream(question, stage, *, kb_name=None, enable_rag=False, enable_web_search=None):
         yield ("chunk", "答案")
         yield ("chunk", "：2")
         yield ("result", SolveResult(

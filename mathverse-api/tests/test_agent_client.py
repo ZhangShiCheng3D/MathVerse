@@ -20,6 +20,18 @@ async def test_deep_solve_maps_answer():
 
 
 @pytest.mark.asyncio
+async def test_deep_solve_web_search_opt_in_threads_through():
+    """use_web override turns web search on; default leaves the global floor (off in tests)."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "x", "session_id": None, "statuses": []}
+        await client.deep_solve("q", "college")
+        assert mock_chat.call_args.kwargs["enable_web_search"] is False
+        await client.deep_solve("q", "college", enable_web_search=True)
+        assert mock_chat.call_args.kwargs["enable_web_search"] is True
+
+
+@pytest.mark.asyncio
 async def test_deep_solve_parses_structured_json():
     client = AgentClient("http://mock:8001")
     prose = (

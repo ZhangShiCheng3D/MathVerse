@@ -11,7 +11,7 @@ const CAPS: { key: Capability; label: string }[] = [
 ];
 
 export default function TutorPage() {
-  const { capability, messages, streaming, isRunning, ask, error, setCapability, send, reply } = useTutorStore();
+  const { capability, messages, streaming, isRunning, ask, error, setCapability, send, regenerate, reply } = useTutorStore();
   const user = useUserStore((s) => s.user);
   const stage = user?.current_stage || 'college';
   const [draft, setDraft] = useState('');
@@ -27,6 +27,8 @@ export default function TutorPage() {
     reply(replyText);
     setReplyText('');
   };
+
+  const canRegen = !isRunning && messages.some((m) => m.role === 'assistant');
 
   return (
     <View style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f3f4f6' }}>
@@ -107,6 +109,15 @@ export default function TutorPage() {
           autoHeight
           style={{ flex: 1, backgroundColor: '#f3f4f6', borderRadius: '10px', padding: '8px 10px', fontSize: '14px', maxHeight: '100px' }}
         />
+        {canRegen && (
+          <Button
+            size="mini"
+            style={{ backgroundColor: '#fff', color: '#4F46E5', border: '1px solid #4F46E5', borderRadius: '10px', fontSize: '13px' }}
+            onClick={() => regenerate(stage)}
+          >
+            重答
+          </Button>
+        )}
         <Button
           loading={isRunning}
           disabled={isRunning}

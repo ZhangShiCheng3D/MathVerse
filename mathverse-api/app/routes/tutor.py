@@ -56,15 +56,23 @@ async def tutor_stream(websocket: WebSocket):
     db = SessionLocal()
     try:
         init = await websocket.receive_json()
+        # regenerate re-runs the session's last user message as a fresh turn — no new
+        # message, but it needs an existing session to regenerate from.
+        is_regen = init.get("type") == "regenerate"
         message = (init.get("message") or "").strip()
-        if not message:
-            await websocket.send_json({"type": "error", "content": "消息不能为空"})
-            return
 
-        is_safe, _ = filter_text(message)
-        if not is_safe:
-            await websocket.send_json({"type": "error", "content": "输入内容包含敏感信息，无法处理"})
-            return
+        if is_regen:
+            if not init.get("session_id"):
+                await websocket.send_json({"type": "error", "content": "无可重新生成的会话"})
+                return
+        else:
+            if not message:
+                await websocket.send_json({"type": "error", "content": "消息不能为空"})
+                return
+            is_safe, _ = filter_text(message)
+            if not is_safe:
+                await websocket.send_json({"type": "error", "content": "输入内容包含敏感信息，无法处理"})
+                return
 
         capability = init.get("capability") or "chat"
         if capability not in _CAPABILITIES:
@@ -94,10 +102,13 @@ async def tutor_stream(websocket: WebSocket):
 
         try:
             async with TurnConnection() as conn:
-                await conn.start_turn(
-                    message, capability=capability, session_id=session_id,
-                    knowledge_bases=knowledge_bases,
-                )
+                if is_regen:
+                    await conn.regenerate(session_id)
+                else:
+                    await conn.start_turn(
+                        message, capability=capability, session_id=session_id,
+                        knowledge_bases=knowledge_bases,
+                    )
 
                 async def pump_engine():
                     nonlocal turn_id, collected
@@ -136,8 +147,8 @@ async def tutor_stream(websocket: WebSocket):
             return
 
         if user and collected:
-            _archive_solve(db, user, message, init.get("stage") or "college",
-                           f"tutor:{capability}", {"answer": collected}, None)
+            _archive_solve(db, user, message or "[重新生成]", init.get("stage") or "college",
+                           f"tutor:{'regenerate' if is_regen else capability}", {"answer": collected}, None)
         log_event(db, "tutor", uid, {"capability": capability})
 
         await websocket.send_json({"type": "done", "session_id": raw_session})

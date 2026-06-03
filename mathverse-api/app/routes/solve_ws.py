@@ -71,11 +71,14 @@ async def solve_stream(websocket: WebSocket):
             kb_name = (tenancy.scope(user.id, req_kb) if req_kb and user
                        else tenancy.scope("curriculum", stage))
 
+        use_web = bool(init.get("use_web"))
+
         degraded = False
         payload = None
         try:
             async for kind, content in agent_client.deep_solve_stream(
-                question, stage, kb_name=kb_name, enable_rag=enable_rag):
+                question, stage, kb_name=kb_name, enable_rag=enable_rag,
+                enable_web_search=use_web):
                 if kind == "chunk":
                     await websocket.send_json({"type": "chunk", "content": content})
                 elif kind == "result":

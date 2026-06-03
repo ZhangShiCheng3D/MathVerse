@@ -24,6 +24,9 @@ class SolveRequest(BaseModel):
     # curriculum library for the stage; with kb_name it uses that user-owned KB.
     use_rag: bool = False
     kb_name: str | None = None
+    # Web search grounding (opt-in). OR'd with the deeptutor_enable_web_search
+    # global floor inside agent_client — so this can only turn search ON.
+    use_web: bool = False
 
 
 def _resolve_kb(user: User | None, req: SolveRequest) -> tuple[str | None, bool]:
@@ -105,7 +108,8 @@ async def deep_solve(
     degraded = False
     try:
         result = await agent_client.deep_solve(req.question, req.stage,
-                                               kb_name=kb_name, enable_rag=enable_rag)
+                                               kb_name=kb_name, enable_rag=enable_rag,
+                                               enable_web_search=req.use_web)
         payload = {
             "answer": result.answer,
             "steps": result.steps,
@@ -144,7 +148,8 @@ async def quick_solve(
     degraded = False
     try:
         response = await agent_client.quick_solve(req.question, req.stage,
-                                                  kb_name=kb_name, enable_rag=enable_rag)
+                                                  kb_name=kb_name, enable_rag=enable_rag,
+                                                  enable_web_search=req.use_web)
     except AgentUnavailableError:
         degraded = True
         response = await _fallback_solve(req.question, req.stage)

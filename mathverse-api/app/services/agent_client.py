@@ -158,7 +158,8 @@ class AgentClient:
             self._inflight.release()
 
     async def deep_solve_stream(self, question: str, stage: str, *,
-                                kb_name: str | None = None, enable_rag: bool = False):
+                                kb_name: str | None = None, enable_rag: bool = False,
+                                enable_web_search: bool | None = None):
         """Streaming deep-solve: yields ('chunk', delta) then ('result', SolveResult)."""
         message = (
             f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
@@ -168,7 +169,7 @@ class AgentClient:
             deeptutor_ws.chat_stream(
                 message, mode="solve", timeout=90.0,
                 kb_name=kb_name, enable_rag=enable_rag,
-                enable_web_search=settings.deeptutor_enable_web_search,
+                enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
             )
         ):
             if kind == "chunk":
@@ -192,7 +193,8 @@ class AgentClient:
                     ))
 
     async def deep_solve(self, question: str, stage: str, kp_id: str | None = None, *,
-                         kb_name: str | None = None, enable_rag: bool = False) -> SolveResult:
+                         kb_name: str | None = None, enable_rag: bool = False,
+                         enable_web_search: bool | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
 
         Prompts the engine to append a structured JSON block, then parses it into the
@@ -207,7 +209,7 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(
             message, mode="solve", timeout=90.0,
             kb_name=kb_name, enable_rag=enable_rag,
-            enable_web_search=settings.deeptutor_enable_web_search,
+            enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
         ))
         raw = data["answer"]
         parsed = _extract_json(raw)
@@ -227,13 +229,14 @@ class AgentClient:
         )
 
     async def quick_solve(self, question: str, stage: str, *,
-                          kb_name: str | None = None, enable_rag: bool = False) -> str:
+                          kb_name: str | None = None, enable_rag: bool = False,
+                          enable_web_search: bool | None = None) -> str:
         """Quick answer via DeepTutor chat WS (chat mode)."""
         message = f"请简要解答这道数学题（学段：{stage}），给出答案和要点：\n{question}"
         data = await self._guarded(deeptutor_ws.chat(
             message, mode="chat", timeout=30.0,
             kb_name=kb_name, enable_rag=enable_rag,
-            enable_web_search=settings.deeptutor_enable_web_search,
+            enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
         ))
         return data["answer"]
 
