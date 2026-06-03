@@ -28,9 +28,12 @@ There is no pytest config file. Tests use FastAPI `TestClient` + `unittest.mock.
 npm install
 npm run dev:weapp     # watch build for 微信开发者工具 (open dist/)
 npm run build:weapp   # production WeChat build
-npm run build:h5      # web build
+npm run build:h5      # web build (also the Capacitor web payload, output dir = dist/)
+npm run test          # Vitest unit tests (jsdom); single file: npx vitest run src/services/api.test.ts
+npm run app:sync      # build:h5 + cap sync android  (refresh the native project)
+npm run app:apk       # app:sync + gradle assembleDebug → android/app/build/outputs/apk/debug/app-debug.apk
 ```
-Note: bare `npx tsc` is noisy (Taro lib types) — that's pre-existing, not a regression.
+Note: bare `npx tsc` is noisy (Taro lib types) — that's pre-existing, not a regression. The first Gradle build downloads the wrapper + deps (slow); local Android SDK + JDK required (this machine has both).
 
 ### Full stack
 `docker-compose.yml`: nginx → mathverse-api (8002) + deeptutor (8001) + qdrant. Needs a `.env`. The API container has a healthcheck; nginx waits for `service_healthy`.
@@ -48,13 +51,16 @@ DeepTutor's real API (verified against `HKUDS/DeepTutor` `deeptutor/api`) is **`
   - `vision_solve(question, image_base64)` → `WS /api/v1/vision/solve`. Events: `text`/`done`/`error`.
   - `judge(question, user_answer, ...)` → `WS /api/v1/question/judge`. Events: `started`/`text`/`done`/`error`.
 - **`app/services/agent_client.py`** — `AgentClient` wraps WS calls in a `CircuitBreaker` (5 failures / 300s recovery); failures → `AgentUnavailableError` → HTTP 503. `deep_solve`/`quick_solve` drive `chat` WS. `deep_solve` injects a JSON-schema hint (`_SOLVE_SCHEMA_HINT`) so the engine appends a structured block, then `_extract_json` rebuilds the three-layer `SolveResult` (answer/steps/knowledge_points/…); **graceful fallback to prose (`steps=[]`)** when absent. Module-level singleton `agent_client`; tests patch `app.routes.<route>.agent_client.<method>` or `app.services.deeptutor_ws.chat`.
-- `generate_quiz` / `chat_with_template` / `generate_lecture` still use legacy `_post` (HTTP) and are flagged with a migration TODO — their `question/*` WS event schema is not yet confirmed. Don't trust those paths until verified on a live engine.
+- `generate_quiz` / `chat_with_template` / `generate_lecture` also go over the `chat` WS (`mode=quiz`/`chat`), each injecting a JSON-schema hint and parsing the appended block (quiz → question list; lecture → prose via a `prompts/lecture/*.txt` system preamble). **Verified working on the live engine** (learn tab 讲解/练习 return real content). There is no `_post` method anymore.
 - **`app/services/deepseek.py`** — shared direct-DeepSeek `chat()` (502 on upstream error). Used by solve's `step-explain`/`similar` and learn's `exercise/grade`.
 
 ### Routers (all `/api/<name>`, registered in `app/main.py`)
-`auth` · `learn` · `me` · `pay` · `questions` · `solve` + `GET /api/health`.
-- `solve`: `/deep` `/quick` (optional-auth, quota+archive+streak, DeepSeek degrade fallback), `/step-explain` `/similar` (**require auth**, DeepSeek-direct).
+`auth` · `learn` · `me` · `pay` · `questions` · `solve` · `solve_ws` + `GET /api/health`.
+- `auth`: WeChat OAuth/`mp-login` + **phone/SMS** (`/sms/send`, `/sms/verify`) + `/refresh` + `/me`.
+- `solve`: `/deep` `/quick` (optional-auth, quota+archive+streak, DeepSeek degrade fallback), `/vision` (photo, DashScope), `/step-explain` `/similar` (**require auth**, DeepSeek-direct).
+- `solve_ws` (`app/routes/solve_ws.py`): **`WS /ws/solve`** — streaming deep-solve. Additive to `/deep` (the non-streaming POST fallback); served under `/ws` so the edge nginx upgrades it. `agent_client.deep_solve_stream` yields `('chunk', delta)` then `('result', SolveResult)`; the route re-applies content filter + optional-token quota + archive. Frontend uses it first and falls back to POST `/deep` on any WS error.
 - `learn`: `/kg/{stage}`, `/lecture`, `/exercise/generate`, **`/exercise/grade`** (AI judges an answer → updates mastery).
+- `me`: `/progress` `/progress/radar` (by stage subjects) · `/mistakes` (CRUD + FSRS review) · `/plan/today` · `/score/estimate` (GET reads DB mastery, POST takes a dict) · `/streak` · **`/profile`** (PATCH stage/exam_mode/nickname).
 
 ### Auth (`app/middleware/auth_middleware.py`)
 WeChat OAuth → JWT access (15 min) + refresh (7 day). `get_current_user` (required) / `get_optional_user` (personalize-if-present) both take `db: Session = Depends(get_db)` so the authed `User` stays attached to the request session. `/api/auth/refresh` reads the token from the **JSON body**. OAuth `state` is a **stateless signed JWT** (multi-worker safe, no server store).
@@ -80,8 +86,10 @@ WeChat OAuth → JWT access (15 min) + refresh (7 day). `get_current_user` (requ
 - **tier**: `free` (daily quota `settings.free_daily_quota`=10) vs paid (`monthly`/`quarterly`/`yearly`, with `tier_expires_at`).
 
 ### Frontend
-- `src/services/api.ts` — `request()` wrapper over `Taro.request`, token storage + 401 refresh, surfaces 429. `BASE_URL` from `process.env.TARO_APP_API_URL` (default `https://kuangyebar.cn`, the deployed host).
-- `src/stores/` — Zustand (`user`/`solve`/`learn`). Pages map 1:1 to the tab bar in `src/app.config.ts`.
+- `src/services/api.ts` — `request()` wrapper over `Taro.request`, token storage + 401 refresh. **429 surfaces the server's `detail`** (so SMS rate-limit ≠ quota message — regression-tested in `api.test.ts`). `BASE_URL` from `process.env.TARO_APP_API_URL` (default `https://kuangyebar.cn`).
+- `src/stores/` — Zustand (`user`/`solve`/`learn`). `solve.solveStreaming` opens `Taro.connectSocket` to `wss://…/ws/solve` (h5 returns a **Promise**<SocketTask> — must `await`; weapp returns it sync), renders chunks live, falls back to POST on error. `user.loginByPhone`/`updateProfile` hit the SMS-login + profile endpoints.
+- **Pages**: tab bar = `index`(home) / `solve` / `learn` / `me` (`src/app.config.ts`, with `assets/tab/*.png` icons copied via `config/index.ts` `copy`). Detail (non-tab) pages: `mistakes` `plan` `score` `membership` `login` `settings`. Login/profile entries branch on `process.env.TARO_ENV` (`weapp`→WeChat, `h5`→phone-login page).
+- `src/index.html` — **required** Taro-h5 template (Taro 4 only mounts HtmlWebpackPlugin when it exists; without it `build:h5` emits no `index.html`).
 
 ## Gotchas
 - **No DB migrations** — changing a model column requires recreating the SQLite table.
@@ -90,17 +98,27 @@ WeChat OAuth → JWT access (15 min) + refresh (7 day). `get_current_user` (requ
 - **Stray dirs** named `C:Usersm1770Desktop...` at repo root are path-as-name artifacts — ignore.
 - Untracked tool output not committed: `.codegraph/` (index — built), `.cursor/`, `mathverse-miniapp/.swc/`.
 
-## Current progress (as of this session)
+## Project progress — PR ledger (all merged to `master`)
 
-Work lives on branch **`improve/design-review-hardening`** → **PR #1** (`ZhangShiCheng3D/MathVerse`, open). Tests went **19 → 65, all green**. Done in rounds:
+Everything below is **merged + deployed + verified**. Backend **95 pytest**, frontend **6 Vitest**, all green; live at `https://kuangyebar.cn`. Design docs are HTML under `docs/` (repo convention: all generated docs are HTML).
 
-1. **Security/correctness (P0/P1)** — payment callback signature+amount+idempotency; auth on `step-explain`/`similar`; paid-tier expiry enforcement; CORS by env; fail-fast on default JWT secret in prod; `refresh` body; stateless OAuth state; `quick_solve` quota+archive; `plan_date`→`Date`; streak; fixed a quota **UTC timezone-misalignment** bug.
-2. **Architecture (P2)** — `get_db` shared sessions; SQLite WAL; DeepSeek degrade fallback; content_filter/prompts wired; score/plan simplified.
-3. **Learning loop** — `LearningProgress` (previously never written) now driven by graded signals; `AnalyticsEvent` logging; new `/api/learn/exercise/grade`.
-4. **DeepTutor integration rewrite** — `deeptutor_ws.py` (verified WS contract) + circuit breaker; `deep_solve` structured-JSON parsing with prose fallback; in-process WS contract tests. Live-engine fix: break on `result` + overall stream timeout (DeepTutor keeps the socket open after a turn).
-5. **Deployment** — full stack live at `https://kuangyebar.cn` (see Deployment section).
+- **PR #1 — foundation hardening + learning loop + DeepTutor integration rewrite.** Security/correctness: payment callback signature+amount+idempotency; auth on `step-explain`/`similar`; paid-tier expiry; CORS by env; fail-fast on default JWT secret in prod; `refresh` reads body; stateless OAuth state; `quick_solve` quota+archive; `plan_date`→`Date`; streak; fixed a quota **UTC timezone-misalignment** bug. Architecture: `get_db` shared sessions; SQLite WAL; DeepSeek degrade fallback; content_filter/prompts wired. Learning loop: `LearningProgress` now written from graded signals; `AnalyticsEvent`; `/api/learn/exercise/grade`. Rewrote DeepTutor calls to the verified WS contract (`deeptutor_ws.py` + circuit breaker; structured-JSON parse w/ prose fallback). Docs: `docs/mathverse-design-review-20260601.html`, `docs/mathverse-design-optimization-20260601.html`.
+- **PR #2 — DeepTutor high-concurrency optimization** (build-time patch overlay, env-gated). See the dedicated section below; **P-MV is tested end-to-end, DeepTutor-side patches are static-verified only**.
+- **PR #3 — 「我的」detail pages + mistake-notebook data loop.** Pages `mistakes`/`plan`/`score`/`membership` bound to real `/api/me/*`+`/api/pay/*`; wired the 4 dead me-page buttons. Added GET `/api/me/score/estimate`. **Add-to-mistakes** from a solve result (no kp_id) and from a wrong exercise (with kp_id) → FSRS review → mastery → estimate/plan/radar.
+- **PR #4 — Android app (Capacitor + H5) + phone/SMS login** (Tencent Cloud SMS, interim master code `314159`). See the "Android app" section.
+- **PR #5 — login page redo + 429 mis-label fix** (`api.ts` 429 now shows the server `detail`).
+- **PR #6 — branded icons/splash/tab-icons + multi-stage knowledge graph** (primary/junior/senior) + KG cache-pollution fix.
+- **PR #7 — radar by the user's stage subjects + shared `services/kg.py`** (dropped the hardcoded gs/xd/gl grouping).
+- **PR #9 / #10 — streaming deep-solve** (`WS /ws/solve`, additive, POST fallback) + the h5 `Taro.connectSocket`-returns-a-Promise fix (caught via emulator test).
+- **PR #11 — user profile/settings page** (`PATCH /api/me/profile`: stage/exam_mode/nickname; fixes "current_stage always `unset` → silently defaults to college").
+- **PR #12 — frontend test harness** (Vitest): `api.ts` (429 regression) + `user` store.
+- **PR #8 / #13 — docs (this file) sync.**
 
-Design docs (HTML, per repo convention all docs are HTML): `docs/mathverse-design-review-20260601.html` (graded review + fix progress) and `docs/mathverse-design-optimization-20260601.html` (DeepTutor-grounded design optimization: reuse-vs-build matrix, verified endpoint-contract appendix, AgentClient v2 blueprint).
+**Remaining work — all blocked on external credentials/approvals** (the code is ready; these need the user to supply secrets or pass an external review, so they cannot be completed autonomously):
+- **SMS** real send: fill `TENCENT_SMS_*` + `sms_enabled=true` (Tencent sign/template approval pending; `314159` is the interim bypass, auto-disabled once SMS is live).
+- **WeChat** login/pay: fill `WECHAT_*` merchant keys + add `kuangyebar.cn` to the Mini Program 合法域名.
+- **Android** store release: release-keystore signing + store-listing assets (the debug APK installs for testing now).
+- Low-value/deferred: route `exercise/grade` to DeepTutor `quiz_judge` (DeepSeek-direct works); OCR via `vision_solve` (photo-solve already works via DashScope).
 
 ## High-concurrency optimization of DeepTutor — branch `feat/deeptutor-high-concurrency`, PR #2
 
@@ -153,12 +171,6 @@ The full stack is deployed and serving at **`https://kuangyebar.cn`**.
 A **Capacitor-wrapped H5 build** ships the same Taro codebase (`mathverse-miniapp/`) as an Android APK — reuses 100% of the pages. Login is **phone + SMS code** (Tencent Cloud SMS, `app/services/sms.py`), independent of WeChat; the frontend branches on `process.env.TARO_ENV` (`weapp`→WeChat, `h5`→phone). CapacitorHttp routes requests natively to bypass WebView CORS (zero backend CORS change). Build: `npm run app:apk` → `mathverse-miniapp/android/app/build/outputs/apk/debug/app-debug.apk`. Branded icons/splash/tab-icons generated by `mathverse-miniapp/scripts/gen_icons.py` + `gen_tab_icons.py` (PIL). Design: `docs/mathverse-android-app-design-20260602.html`. **Verified end-to-end on an emulator**: loads (no white screen), CapacitorHttp networking, multi-stage KG, tab icons, phone-login branching.
 - **Interim master code `314159`** (`settings.sms_master_code`): logs in any phone without a real code — **dev mode only** (`sms_enabled=False`); real SMS going live disables it. For use while the Tencent SMS sign/template approval is pending.
 - **Knowledge graph is now multi-stage**: `knowledge-graph/{primary-low,primary-high,junior,senior}.json` + `kaoyan-college.json` (college/kaoyan fall back to it). Shared loader `app/services/kg.py`; `/api/me/progress/radar` aggregates by the user's stage subjects.
+- **`SmsCode` table** holds OTPs; `init_db` auto-creates it. `User.phone` already existed (no migration). Redeploy gotcha: `docker compose up -d --build mathverse-api` also recreates deeptutor — use **`--no-deps`** to touch only the API. Server↔GitHub `git fetch` occasionally fails on TLS; on failure, `scp` the changed file(s) into the server worktree and rebuild (the image `COPY`s the worktree), then `git reset --hard origin/master` once the network recovers.
 
-**Still open:**
-- WeChat side (user-only): add `https://kuangyebar.cn` to the Mini Program 合法域名; fill `WECHAT_*` in server `.env` to enable login/pay (currently empty → login/pay disabled, solve/learn unaffected).
-- SMS (user-only): real send needs `TENCENT_SMS_*` (secret_id/key, sdk_app_id, sign, template_id) + `sms_enabled=true`; Tencent sign/template approval pending (`314159` is the interim bypass).
-- Android (user-only): release-keystore signing + store-listing assets (the debug APK installs for testing).
-- Migrate `generate_quiz` / lecture from legacy `_post` to `question/*` WS (event schema unconfirmed).
-- Route `exercise/grade` to DeepTutor `quiz_judge` (currently DeepSeek-direct, works); OCR via `vision_solve` (photo-solve already works via DashScope).
-
-**Done since (autonomous polish round):** 流式解题（`WS /ws/solve`，附加式，POST 兜底；前端 `Taro.connectSocket` 双端，CapacitorHttp 不拦 WS，模拟器验证通过）· 多学段知识图谱（小学/初中/高中）+ 共享 `services/kg.py` + 雷达图按学段聚合 · 用户档案设置页（`PATCH /api/me/profile`，学段/考试类型/昵称）· 品牌图标/启动图/Tab 图标（`scripts/gen_*.py`）· 前端测试基建（Vitest，`npm run test`）· 登录页重做 + 429 误报修复 · KG 缓存污染修复.
+(See the PR ledger above for the full progress record and the remaining credential-blocked work.)
