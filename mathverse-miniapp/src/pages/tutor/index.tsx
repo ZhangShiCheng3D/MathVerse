@@ -1,17 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Textarea, Button, ScrollView, Input } from '@tarojs/components';
-import { useTutorStore, Capability } from '../../stores/tutor';
+import { useTutorStore } from '../../stores/tutor';
 import { useUserStore } from '../../stores/user';
 
-const CAPS: { key: Capability; label: string }[] = [
-  { key: 'chat', label: '对话' },
-  { key: 'solve', label: '解题' },
-  { key: 'research', label: '深度研究' },
-  { key: 'visualize', label: '可视化' },
-];
-
 export default function TutorPage() {
-  const { capability, messages, streaming, isRunning, ask, error, setCapability, send, regenerate, reply } = useTutorStore();
+  const { capability, capabilities, messages, streaming, isRunning, ask, error, setCapability, send, regenerate, reply, fetchCapabilities } = useTutorStore();
+  useEffect(() => { fetchCapabilities(); }, []);
   const user = useUserStore((s) => s.user);
   const stage = user?.current_stage || 'college';
   const [draft, setDraft] = useState('');
@@ -34,14 +28,14 @@ export default function TutorPage() {
     <View style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f3f4f6' }}>
       {/* capability switcher */}
       <View style={{ display: 'flex', gap: '6px', padding: '10px', backgroundColor: '#fff', borderBottom: '1px solid #e5e7eb' }}>
-        {CAPS.map((c) => (
+        {capabilities.map((c) => (
           <Text
-            key={c.key}
-            onClick={() => setCapability(c.key)}
+            key={c.id}
+            onClick={() => setCapability(c.id)}
             style={{
               padding: '4px 12px', borderRadius: '9999px', fontSize: '13px',
-              backgroundColor: capability === c.key ? '#4F46E5' : '#f3f4f6',
-              color: capability === c.key ? '#fff' : '#6b7280',
+              backgroundColor: capability === c.id ? '#4F46E5' : '#f3f4f6',
+              color: capability === c.id ? '#fff' : '#6b7280',
             }}
           >
             {c.label}

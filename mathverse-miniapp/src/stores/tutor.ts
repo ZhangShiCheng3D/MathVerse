@@ -1,7 +1,23 @@
 import Taro from '@tarojs/taro';
 import { create } from 'zustand';
+import { request } from '../services/api';
 
 export type Capability = 'chat' | 'solve' | 'research' | 'visualize';
+
+export interface CapabilityMeta {
+  id: Capability;
+  label: string;
+  description?: string;
+}
+
+// Bootstrap fallback only — the authoritative list comes from the server
+// (GET /api/tutor/capabilities) via fetchCapabilities(), so front/back can't drift.
+const DEFAULT_CAPABILITIES: CapabilityMeta[] = [
+  { id: 'chat', label: '对话' },
+  { id: 'solve', label: '解题' },
+  { id: 'research', label: '深度研究' },
+  { id: 'visualize', label: '可视化' },
+];
 
 export interface TutorMessage {
   role: 'user' | 'assistant';
@@ -10,6 +26,7 @@ export interface TutorMessage {
 
 interface TutorStore {
   capability: Capability;
+  capabilities: CapabilityMeta[];
   messages: TutorMessage[];
   streaming: string;
   isRunning: boolean;
@@ -17,6 +34,7 @@ interface TutorStore {
   sessionId: string | null;
   error: string;
   setCapability: (c: Capability) => void;
+  fetchCapabilities: () => Promise<void>;
   send: (text: string, stage: string, useRag?: boolean) => void;
   regenerate: (stage: string) => void;
   reply: (text: string) => void;
@@ -98,6 +116,7 @@ const openTurnSocket = (set: any, get: any, initPayload: Record<string, any>) =>
 
 export const useTutorStore = create<TutorStore>((set, get) => ({
   capability: 'chat',
+  capabilities: DEFAULT_CAPABILITIES,
   messages: [],
   streaming: '',
   isRunning: false,
@@ -106,6 +125,15 @@ export const useTutorStore = create<TutorStore>((set, get) => ({
   error: '',
 
   setCapability: (c) => set({ capability: c }),
+
+  fetchCapabilities: async () => {
+    try {
+      const res = await request<{ capabilities: CapabilityMeta[] }>(
+        '/api/tutor/capabilities', { requireAuth: false }
+      );
+      if (res?.capabilities?.length) set({ capabilities: res.capabilities });
+    } catch { /* keep the bootstrap defaults on failure */ }
+  },
 
   send: (text, stage, useRag = false) => {
     if (!text.trim() || get().isRunning) return;

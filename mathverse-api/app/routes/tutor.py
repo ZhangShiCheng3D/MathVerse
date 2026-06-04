@@ -34,8 +34,30 @@ from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 ws_router = APIRouter()
+router = APIRouter(prefix="/api/tutor", tags=["tutor"])
 
-_CAPABILITIES = {"chat", "solve", "research", "visualize"}
+# The curated subset of DeepTutor turn capabilities MathVerse exposes — the
+# SINGLE SOURCE OF TRUTH. The frontend fetches it via GET /api/tutor/capabilities
+# instead of keeping its own hardcoded copy (eliminates front/back drift).
+# DeepTutor has NO clean HTTP capability-discovery endpoint (its
+# /api/v1/capabilities/settings is a partial *settings* surface — keys are
+# solve/research/question/vision_solver/math_animator, not the turn registry —
+# so deriving the list from it would be a misused contract). Hence this list is
+# curated, not discovered. co_writer/tutorbot are deliberately excluded (global
+# state, can't tenant-isolate).
+TUTOR_CAPABILITIES = [
+    {"id": "chat", "label": "对话", "description": "通用数学对话答疑"},
+    {"id": "solve", "label": "解题", "description": "分步解题与推理"},
+    {"id": "research", "label": "深度研究", "description": "多轮检索式深度探究"},
+    {"id": "visualize", "label": "可视化", "description": "几何/函数图形可视化"},
+]
+_CAPABILITIES = {c["id"] for c in TUTOR_CAPABILITIES}
+
+
+@router.get("/capabilities")
+async def list_capabilities():
+    """Capability list for the tutor UI — server is the source of truth."""
+    return {"capabilities": TUTOR_CAPABILITIES}
 
 
 def _user_from_token(db, token: str | None):

@@ -13,6 +13,17 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_capabilities_endpoint_is_source_of_truth():
+    from app.routes.tutor import _CAPABILITIES
+    resp = client.get("/api/tutor/capabilities")
+    assert resp.status_code == 200
+    caps = resp.json()["capabilities"]
+    ids = {c["id"] for c in caps}
+    # Served list and the WS validator must derive from the same source.
+    assert ids == _CAPABILITIES == {"chat", "solve", "research", "visualize"}
+    assert all(c.get("label") for c in caps)
+
+
 class _FakeConn:
     """Stand-in for deeptutor.turn.TurnConnection. Records the start args and
     pauses on ask_user until submit_reply is called."""
