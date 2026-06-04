@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import websockets
 from app.config import settings
 from app.services import deeptutor_ws
+from app.services import metrics
 from app.services.deeptutor import rest
 from app.services.deeptutor.transport import RestError
 
@@ -124,14 +125,17 @@ class AgentClient:
             await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
         except asyncio.TimeoutError:
             awaitable.close()
+            metrics.inc("admission_saturation_total")
             raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
         try:
+            metrics.inc("external_call_total")
             result = await awaitable
             self.circuit.record_success()
             return result
         except (deeptutor_ws.WSStreamError, RestError, OSError, asyncio.TimeoutError,
                 websockets.WebSocketException) as e:
             self.circuit.record_failure()
+            metrics.inc("external_error_total")
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
         finally:
             self._inflight.release()
@@ -145,14 +149,17 @@ class AgentClient:
             await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
         except asyncio.TimeoutError:
             await agen.aclose()
+            metrics.inc("admission_saturation_total")
             raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
         try:
+            metrics.inc("external_call_total")
             async for item in agen:
                 yield item
             self.circuit.record_success()
         except (deeptutor_ws.WSStreamError, RestError, OSError, asyncio.TimeoutError,
                 websockets.WebSocketException) as e:
             self.circuit.record_failure()
+            metrics.inc("external_error_total")
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
         finally:
             self._inflight.release()

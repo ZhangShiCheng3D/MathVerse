@@ -45,3 +45,49 @@ app.include_router(book.router)
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "mathverse-api"}
+
+
+@app.get("/api/metrics")
+async def metrics_endpoint():
+    """Operational metrics (process-local, per worker). No PII — but reveals
+    traffic volume, so restrict at the edge (nginx allow/deny) if exposed."""
+    from app.services import metrics as _metrics, cost_guard as _cost_guard
+    from app.services.agent_client import agent_client as _agent
+
+    snap = _metrics.snapshot()
+    c = snap["counters"]
+    capacity = settings.deeptutor_max_concurrency
+    # Semaphore exposes remaining permits via _value; in-flight = capacity - free.
+    in_flight = capacity - _agent._inflight._value
+    calls = c.get("external_call_total", 0)
+    errors = c.get("external_error_total", 0)
+    solves = c.get("solve_total", 0)
+    degraded = c.get("solve_degraded_total", 0)
+    by_type = {
+        k[len("solve_"):-len("_total")]: v
+        for k, v in c.items()
+        if k.startswith("solve_") and k.endswith("_total")
+        and k not in ("solve_total", "solve_degraded_total")
+    }
+    return {
+        "service": "mathverse-api",
+        "admission": {
+            "capacity": capacity,
+            "in_flight": in_flight,
+            "saturation_total": c.get("admission_saturation_total", 0),
+        },
+        "circuit": {"open": _agent.circuit.is_open, "failures": _agent.circuit.failures},
+        "external_calls": {
+            "total": calls,
+            "errors": errors,
+            "error_rate": round(errors / calls, 4) if calls else 0.0,
+        },
+        "solve": {
+            "total": solves,
+            "degraded": degraded,
+            "degrade_rate": round(degraded / solves, 4) if solves else 0.0,
+            "by_type": by_type,
+        },
+        "db_write": snap["db_write"],
+        "cost_guard": _cost_guard.status(),
+    }

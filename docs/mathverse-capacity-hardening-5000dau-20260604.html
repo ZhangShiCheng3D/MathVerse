@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MathVerse 5000 日活容量加固 — 2026-06-04</title>
+<style>
+  :root { --bg:#0f1117; --card:#1a1d27; --fg:#e6e8ef; --muted:#9aa0b4; --accent:#5b8cff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --border:#2a2e3c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.65 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:40px 24px 80px; }
+  h1 { font-size:28px; margin:0 0 6px; }
+  h2 { font-size:20px; margin:38px 0 12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  h3 { font-size:16px; margin:22px 0 8px; color:var(--accent); }
+  .sub { color:var(--muted); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px 20px; margin:14px 0; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+  th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  code { background:#11141c; border:1px solid var(--border); border-radius:5px; padding:1px 6px; font-family:"SF Mono",Consolas,monospace; font-size:13px; }
+  pre { background:#11141c; border:1px solid var(--border); border-radius:8px; padding:14px 16px; overflow-x:auto; font-size:13px; }
+  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:20px; border:1px solid var(--border); }
+  .good { color:var(--good); border-color:var(--good); }
+  .warn { color:var(--warn); border-color:var(--warn); }
+  .bad { color:var(--bad); border-color:var(--bad); }
+  .muted { color:var(--muted); }
+  ul { margin:8px 0; padding-left:22px; }
+  li { margin:4px 0; }
+  .kpi { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0; }
+  .kpi div { flex:1; min-width:150px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .kpi b { display:block; font-size:22px; }
+  .kpi span { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MathVerse 5000 日活容量加固</h1>
+  <p class="sub">2026-06-04 · 分支 <code>feat/deeptutor-full-integration</code> · 后端 148 pytest 全绿</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">核心判断：这套架构 <span class="good">不需要 GPU</span></h3>
+    <p>真正的 LLM 推理在<strong>外部 API</strong>（DeepSeek <code>deepseek-chat</code> 文本 + DashScope <code>text-embedding-v3</code> / <code>qwen-vl-max</code> 视觉），本机三个容器（mathverse-api / deeptutor / qdrant）只做编排、长连接转发与向量检索。负载是 <strong>I/O 密集</strong>（等外部 API），不是算力密集。因此 5000 日活的瓶颈是<strong>「并发连接 + 内存 + 单机写库 + 外部 API 花费」</strong>，单机 async 事件循环足以承载，无需立刻上 GPU 或多副本。</p>
+  </div>
+
+  <h2>1. 推荐服务器规格</h2>
+  <div class="kpi">
+    <div><b>8 vCPU</b><span>突发峰值 + 多核余量</span></div>
+    <div><b>16 GB</b><span>qdrant + deeptutor 并发 + 留 PG 余地</span></div>
+    <div><b>100 GB SSD</b><span>SQLite/qdrant/RAG 索引/日志/备份</span></div>
+    <div><b>按量带宽 ≥5 Mbps</b><span>晚高峰潮汐，避免固定带宽限速</span></div>
+  </div>
+  <table>
+    <tr><th>负载维度</th><th>5000 日活估算</th></tr>
+    <tr><td>日请求量</td><td>5000 × ~20 次/人 ≈ 10 万次/天</td></tr>
+    <tr><td>峰值 QPS</td><td>集中晚间 4–6 小时 → 均值 ~7，突发 ~20–30</td></tr>
+    <tr><td>峰值在途长连接</td><td>QPS × 单次 10–30s ≈ 100–400 个并发 WebSocket</td></tr>
+    <tr><td>出向带宽峰值</td><td>~2–3 Mbps（拍照上传是入向，通常免费）</td></tr>
+  </table>
+  <p class="muted">腾讯云对标：标准型 <code>S5.2XLARGE16</code>（8C16G）。省钱下限 4C8G 也能扛平滑流量，但晚高峰长连接 + qdrant 增长后余量很薄，不建议更低。<strong>真正的线性成本在外部 LLM API 调用费</strong>，随用量增长，需单独做预算监控（见第 5 节成本护栏）。</p>
+
+  <h2>2. 本次加固内容（已落地 + 测试）</h2>
+  <table>
+    <tr><th>项</th><th>改动</th><th>风险</th></tr>
+    <tr><td><strong>可观测性</strong></td><td>新增 <code>GET /api/metrics</code>：admission 在途/容量/饱和次数、circuit 状态、外部调用错误率、各类 solve 计数与降级率、DB 写延迟、成本护栏状态</td><td><span class="tag good">无行为变更</span></td></tr>
+    <tr><td><strong>SQLite 写吞吐</strong></td><td><code>synchronous=NORMAL</code>（WAL 安全，写吞吐数倍）+ <code>wal_autocheckpoint=1000</code> + <code>cache_size≈16MB</code> + <code>busy_timeout 5s→10s</code>；新增 DB 写延迟监听 + 在线备份脚本</td><td><span class="tag good">无行为变更</span></td></tr>
+    <tr><td><strong>Admission 默认</strong></td><td><code>deeptutor_max_concurrency</code> 默认 <strong>64→128</strong>（I/O 密集，减少突发时不必要的降级；仍 env 可调）</td><td><span class="tag good">低</span></td></tr>
+    <tr><td><strong>LLM 成本护栏</strong></td><td>新增 <code>cost_guard.py</code>：UTC 日维度估算 token 总量，软阈值告警、硬阈值<strong>仅挡免费/匿名</strong>新请求（付费用户不受影响），默认 0=关闭</td><td><span class="tag warn">行为变更（默认关）</span></td></tr>
+  </table>
+
+  <h2>3. 启用与调优（运维）</h2>
+  <p>所有新旗标已在 <code>docker-compose.yml</code> 的 mathverse-api 服务暴露，默认值保持现行为。在服务器 <code>~/MathVerse/.env</code> 设置即可：</p>
+  <pre># Admission：引擎有余量可调高，引擎开始超时则调低
+DEEPTUTOR_MAX_CONCURRENCY=128
+
+# 成本护栏：估算 token/日。0=关闭。
+# 推荐档位 ≈ DAU × solves/人/日 × ~3000 token/题 × 1.5 安全系数
+# 5000 × 20 × 3000 × 1.5 ≈ 450M
+DAILY_TOKEN_BUDGET_HARD=450000000
+DAILY_TOKEN_BUDGET_SOFT=315000000   # ≈ 0.7 × hard</pre>
+  <p class="muted">重新部署：<code>cd ~/MathVerse &amp;&amp; git pull &amp;&amp; docker compose up -d --build --no-deps mathverse-api</code>（<code>--no-deps</code> 只重建 API，不动 deeptutor/qdrant）。</p>
+
+  <h3>在线备份（cron）</h3>
+  <pre># 每天 03:00 在线热备 SQLite，保留 14 天
+0 3 * * *  docker exec mathverse-mathverse-api-1 bash /app/scripts/backup_db.sh</pre>
+
+  <h3>监控接入</h3>
+  <p><code>/api/metrics</code> 返回 JSON，可被腾讯云监控/Prometheus exporter 抓取。建议告警线：<code>circuit.open=true</code>、<code>admission.saturation_total</code> 持续增长、<code>solve.degrade_rate &gt; 0.1</code>、<code>db_write.max_ms</code> 飙升、<code>cost_guard.soft_exceeded=true</code>。<strong>该端点暴露流量规模，建议在 nginx 用 allow/deny 限制来源 IP。</strong></p>
+
+  <h2>4. 成本护栏触发逻辑</h2>
+  <div class="card">
+    <p><strong>策略 = 软告警 + 硬熔断仅挡免费。</strong>关键事实：降级路径走的也是付费的 DeepSeek，所以「降级」并不省钱——超预算时有意义的动作只有「告警」或「挡新请求」。</p>
+    <ul>
+      <li><strong>软阈值</strong>：仅在 <code>/api/metrics</code> 标红 + 计数，不挡任何人。</li>
+      <li><strong>硬阈值</strong>：免费 / 匿名用户的<strong>新</strong> solve 请求返回 503 友好提示；<strong>付费用户永不被挡</strong>（保护付费体验 + 账单封顶）。</li>
+      <li>UTC 零点自动归零；进程内计数（每 worker 独立，单机单 worker 即全局）。</li>
+    </ul>
+  </div>
+  <p class="muted">范围说明：护栏接在量最大的 <code>/deep</code> <code>/quick</code> <code>/vision</code> <code>/visualize</code> 四个 optional-auth 端点；<code>/step-explain</code> <code>/similar</code> 为 auth-gated 的会话内低频调用，未挡（避免打断已登录用户的连续会话）。</p>
+
+  <h2>5. 明确推迟（不为 5000 日活上）</h2>
+  <div class="card">
+    <p><span class="tag bad">不启用</span> <strong>DeepTutor PG/Redis 多 worker 横向扩展</strong>（PR #2 的 P0–P3）。原因：</p>
+    <ul>
+      <li>5000 日活 I/O 密集型负载，单机单 worker async 本就够用；</li>
+      <li>该套补丁目前<strong>仅 static-verified</strong>，未经真机 build + PG/Redis/k6 验证；</li>
+      <li><strong>红线</strong>：面 A turn 运行时在 <code>WEB_CONCURRENCY&gt;1</code> 或多副本时<strong>必须先配 <code>DEEPTUTOR_PG_DSN</code></strong>，否则跨 worker 的 turn 会被当孤儿杀掉。</li>
+    </ul>
+    <p>当单机 8C16G 的 <code>/api/metrics</code> 出现持续 admission 饱和 / CPU 打满时，再按 <code>docs/deeptutor-high-concurrency-rollout-runbook-20260602.html</code> 走真机验证后启用——那是 1 万级 / 横向扩展的路线，不是 5000 日活的当务之急。</p>
+  </div>
+  <h3>服务器侧后续（需在服务器操作，非本次代码）</h3>
+  <ul>
+    <li>给容器加 <code>mem_limit</code> / <code>cpus</code>（避免 OOM 级联）——线上 override 已有部分，建议复核 qdrant/deeptutor 上限。</li>
+    <li>对象存储分流 <code>/api/outputs</code>（仅 DeepTutor 可视化产物用，MathVerse 不消费，可缓议）。</li>
+  </ul>
+
+  <h2>6. 验证状态</h2>
+  <table>
+    <tr><td><span class="tag good">已验证</span></td><td>后端 148 pytest 全绿（含新增 test_metrics 3 + test_cost_guard 4）；全部为 mock 测试，不触网</td></tr>
+    <tr><td><span class="tag warn">待真机</span></td><td>线上 <code>/api/metrics</code> 实测、成本护栏阈值实测、SQLite pragma 在生产负载下的写延迟对比（重部署后看 <code>db_write</code>）</td></tr>
+  </table>
+</div>
+</body>
+</html>

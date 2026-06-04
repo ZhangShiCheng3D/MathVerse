@@ -36,6 +36,10 @@ services:
       - WECHAT_PAY_API_KEY=${WECHAT_PAY_API_KEY}
       - DEEPTUTOR_URL=http://deeptutor:8001
       - MATH_OCR_API_KEY=${MATH_OCR_API_KEY}
+      # Capacity-hardening knobs (defaults preserve current behavior).
+      - DEEPTUTOR_MAX_CONCURRENCY=${DEEPTUTOR_MAX_CONCURRENCY:-128}
+      - DAILY_TOKEN_BUDGET_SOFT=${DAILY_TOKEN_BUDGET_SOFT:-0}
+      - DAILY_TOKEN_BUDGET_HARD=${DAILY_TOKEN_BUDGET_HARD:-0}
     volumes:
       - ./data:/app/data
       - ./mathverse-api/knowledge-graph:/app/knowledge-graph:ro
