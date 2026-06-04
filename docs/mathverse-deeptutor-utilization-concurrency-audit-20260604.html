@@ -74,7 +74,7 @@
     <tr><th>差距</th><th>影响</th><th>性质</th></tr>
     <tr><td>出题缺 RAG 接地</td><td><strong>已修复</strong>：<code>generate_quiz</code> + <code>/exercise/generate</code> 接入 RAG（<code>kb_name</code>+<code>enable_rag</code>，默认课程 KB），走已验证的 chat-WS 路径。<br><span class="ref">核实发现：原生 <code>WS /question/generate</code> 输入契约 OK（requirement+kb_name+count），但输出经 AgentCoordinator 内部 callback 队列（与进程日志混流）+ 落引擎本地磁盘，无可消费的 HTTP 输出契约 → 评估后放弃，避免臆造契约。</span></td><td><span class="tag g">✅ 已修复</span></td></tr>
     <tr><td>能力清单前后端硬编码漂移</td><td>原前端硬编码 4 个 capability（<code>tutor/index.tsx</code>）与后端 <code>_CAPABILITIES</code> 各存一份。<strong>已修复</strong>：后端 <code>TUTOR_CAPABILITIES</code> 单一真源 + <code>GET /api/tutor/capabilities</code>，前端改为拉取。<br><span class="ref">核实发现：引擎无干净的能力发现 HTTP 端点（<code>/capabilities/settings</code> 是部分设置面，键为 solve/research/question/vision_solver/math_animator，对不上 turn 能力名），故采用后端真源而非引擎发现——避免滥用契约。</span></td><td><span class="tag g">✅ 已修复</span></td></tr>
-    <tr><td>文档输入 UX</td><td><strong>已澄清 + 补齐</strong>：原审计以为接 <code>attachments</code> router——实为<strong>只读取回</strong>（<code>GET /{session}/{id}/{file}</code>），非上传 API。文档<strong>输入</strong>本由已验证的 KB upload 覆盖；缺的是前端 UX → 已补「上传文档建库 / 上传文档」（weapp，h5/App 待 DOM-input 跟进）。上传后经 <code>use_rag</code> 喂导师/出题。</td><td><span class="tag g">✅ 已补 (weapp)</span></td></tr>
+    <tr><td>文档输入 UX</td><td><strong>已澄清 + 补齐</strong>：原审计以为接 <code>attachments</code> router——实为<strong>只读取回</strong>（<code>GET /{session}/{id}/{file}</code>），非上传 API。文档<strong>输入</strong>本由已验证的 KB upload 覆盖；缺的是前端 UX → 已补「上传文档建库 / 上传文档」（weapp 用 chooseMessageFile+uploadFile；h5/App 用 DOM input+fetch FormData，保留文件名供引擎判类型）。上传后经 <code>use_rag</code> 喂导师/出题。</td><td><span class="tag g">✅ 已补 (weapp+h5)</span></td></tr>
     <tr><td>turn 仅 4 capability + 无 <code>tools</code></td><td>引擎注册表更大（deep_research 等未透出）；无受控工具导师 <span class="ref">tutor.py:38</span></td><td><span class="tag w">渐进增强</span></td></tr>
   </table>
 
@@ -125,7 +125,7 @@
     <tr><th>优先级</th><th>动作</th><th>依赖</th></tr>
     <tr><td><span class="tag b">P0</span></td><td><strong>PR #15 + 高并发补丁真机验证</strong>（按 <code>...rollout-runbook-20260602.html</code> Stage 0-5：build + PG/Redis/k6）。这是合并与扩容的总前提</td><td>需真机环境（线上引擎可用）</td></tr>
     <tr><td><span class="tag w">P1</span></td><td>需要扩容时：<strong>先开 <code>DEEPTUTOR_PG_DSN</code>，再升 <code>WEB_CONCURRENCY</code></strong>（遵守红线）；接入监控告警（<code>/api/metrics</code> → 云监控/Prometheus）</td><td>P0 通过后</td></tr>
-    <tr><td><span class="tag g">P2</span></td><td><s>能力清单漂移</s> ✅、<s>文档输入闭环</s> ✅（KB 上传前端已补 weapp）。剩余：h5/App 文档上传（DOM-input）</td><td>可自主</td></tr>
+    <tr><td><span class="tag g">P2</span></td><td><s>能力清单漂移</s> ✅、<s>文档输入闭环</s> ✅（KB 上传前端已补 weapp+h5）、<s>成本护栏覆盖导师 turn</s> ✅。基本完结</td><td>—</td></tr>
     <tr><td><span class="tag g">P3</span></td><td><s>出题缺 RAG 接地</s> <strong>✅ 已修复</strong>（已验证 chat-WS + 课程 KB）。原生 <code>/generate</code> 因输出契约不可消费而不接</td><td>—</td></tr>
     <tr><td>—</td><td><strong>不动：</strong>co_writer / tutorbot / 全局 memory 写入 —— 维持现有有意决策</td><td>—</td></tr>
   </table>

@@ -28,6 +28,7 @@ from app.services.agent_client import AgentUnavailableError
 from app.services.deeptutor import tenancy
 from app.services.deeptutor.turn import TurnConnection
 from app.services.quota import enforce_solve_quota
+from app.services import cost_guard
 from app.services.analytics import log_event
 from app.routes.solve import _archive_solve
 from app.database import SessionLocal
@@ -107,6 +108,13 @@ async def tutor_stream(websocket: WebSocket):
             except HTTPException as e:
                 await websocket.send_json({"type": "error", "content": e.detail, "code": 429})
                 return
+        # Global LLM-spend guardrail — the turn is a major LLM consumer; shed new
+        # free/anon turns once over the hard daily budget (paid users never blocked).
+        try:
+            cost_guard.enforce_cost_budget(user)
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "content": e.detail, "code": 503})
+            return
 
         uid = user.id if user else None
         # Tenancy-scoped session so DeepTutor's shared session store stays isolated.
@@ -172,6 +180,7 @@ async def tutor_stream(websocket: WebSocket):
             _archive_solve(db, user, message or "[重新生成]", init.get("stage") or "college",
                            f"tutor:{'regenerate' if is_regen else capability}", {"answer": collected}, None)
         log_event(db, "tutor", uid, {"capability": capability})
+        cost_guard.record(message or "", collected)
 
         await websocket.send_json({"type": "done", "session_id": raw_session})
     except WebSocketDisconnect:

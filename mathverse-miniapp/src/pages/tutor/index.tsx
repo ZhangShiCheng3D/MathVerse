@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Taro from '@tarojs/taro';
 import { View, Text, Textarea, Button, ScrollView, Input } from '@tarojs/components';
 import { useTutorStore } from '../../stores/tutor';
 import { useUserStore } from '../../stores/user';
@@ -74,7 +75,17 @@ export default function TutorPage() {
           </View>
         )}
         {error !== '' && (
-          <Text style={{ display: 'block', textAlign: 'center', color: '#ef4444', fontSize: '13px', padding: '8px' }}>{error}</Text>
+          <View style={{ textAlign: 'center', padding: '8px' }}>
+            <Text style={{ color: '#ef4444', fontSize: '13px' }}>{error}</Text>
+            {/会员|额度|上限/.test(error) && (
+              <Text
+                onClick={() => Taro.navigateTo({ url: '/pages/membership/index' })}
+                style={{ color: '#4F46E5', fontSize: '13px', marginLeft: '8px', textDecoration: 'underline' }}
+              >
+                去开通会员 ›
+              </Text>
+            )}
+          </View>
         )}
       </ScrollView>
 

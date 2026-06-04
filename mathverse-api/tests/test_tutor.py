@@ -68,6 +68,23 @@ def test_tutor_rejects_empty_message():
         assert m["type"] == "error"
 
 
+def test_tutor_cost_guard_sheds_free(monkeypatch):
+    """Over the hard daily budget, a free/anon turn is shed with a 503 error."""
+    from app.config import settings
+    from app.services import cost_guard
+    cost_guard.reset()
+    monkeypatch.setattr(settings, "daily_token_budget_hard", 5)
+    cost_guard.record("x" * 30)  # 20 tokens >= 5 -> over hard
+    try:
+        with client.websocket_connect("/ws/tutor") as ws:
+            ws.send_json({"message": "出一道导数题"})
+            m = ws.receive_json()
+            assert m["type"] == "error"
+            assert m.get("code") == 503
+    finally:
+        cost_guard.reset()
+
+
 def test_tutor_ask_user_roundtrip(monkeypatch):
     monkeypatch.setattr("app.routes.tutor.TurnConnection", _FakeConn)
     with client.websocket_connect("/ws/tutor") as ws:
