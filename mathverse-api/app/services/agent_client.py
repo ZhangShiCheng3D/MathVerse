@@ -264,17 +264,24 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(full_message, mode="chat", timeout=90.0))
         return data["answer"]
 
-    async def generate_quiz(self, kp_name: str, count: int = 5, stage: str = "college") -> list[dict]:
+    async def generate_quiz(self, kp_name: str, count: int = 5, stage: str = "college", *,
+                            kb_name: str | None = None, enable_rag: bool = False) -> list[dict]:
         """Generate quiz questions via DeepTutor chat WS (mode=quiz).
 
         Prompts the engine to append a structured JSON block, then parses the
         question list. Degrades to an empty list when no JSON block is present.
+        When kb_name+enable_rag are set the questions are grounded in that
+        knowledge base (RAG) — the verified chat-WS path, since the native
+        question/generate WS streams results through an engine-internal callback
+        + on-disk files (no consumable HTTP contract for a BFF).
         """
         message = (
             f"请围绕知识点「{kp_name}」（学段：{stage}）出 {count} 道练习题，覆盖选择/填空/解答题型。\n"
             f"{_QUIZ_SCHEMA_HINT}"
         )
-        data = await self._guarded(deeptutor_ws.chat(message, mode="quiz", timeout=90.0))
+        data = await self._guarded(deeptutor_ws.chat(
+            message, mode="quiz", timeout=90.0, kb_name=kb_name, enable_rag=enable_rag,
+        ))
         parsed = _extract_json(data["answer"])
         questions = parsed.get("questions") if parsed else None
         return questions if isinstance(questions, list) else []

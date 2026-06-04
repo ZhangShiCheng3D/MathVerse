@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.middleware.auth_middleware import get_optional_user, get_current_user
 from app.models.all import User, LearningProgress
 from app.services.agent_client import agent_client, AgentUnavailableError
+from app.services.deeptutor import tenancy
 from app.services.kg import load_kg
 from app.services.progress import record_attempt
 from app.services.analytics import log_event
@@ -64,13 +65,25 @@ class ExerciseRequest(BaseModel):
     kp_name: str
     count: int = 5
     stage: str = "college"
+    # RAG grounding (opt-in), same semantics as /api/solve: use_rag without
+    # kb_name falls back to the shared curriculum library for the stage.
+    use_rag: bool = False
+    kb_name: str | None = None
 
 
 @router.post("/exercise/generate")
 async def generate_exercise(req: ExerciseRequest, user: User | None = Depends(get_optional_user)):
     """Generate practice exercises for a knowledge point."""
+    if req.use_rag and req.kb_name and user:
+        kb_name, enable_rag = tenancy.scope(user.id, req.kb_name), True
+    elif req.use_rag:
+        kb_name, enable_rag = tenancy.scope("curriculum", req.stage), True
+    else:
+        kb_name, enable_rag = None, False
     try:
-        questions = await agent_client.generate_quiz(req.kp_name, req.count, req.stage)
+        questions = await agent_client.generate_quiz(
+            req.kp_name, req.count, req.stage, kb_name=kb_name, enable_rag=enable_rag,
+        )
     except AgentUnavailableError as e:
         raise HTTPException(status_code=503, detail=f"出题服务暂时不可用: {e}")
     return {"kp_id": req.kp_id, "questions": questions}

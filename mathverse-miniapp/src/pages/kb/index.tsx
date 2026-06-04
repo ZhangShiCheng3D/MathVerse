@@ -5,7 +5,7 @@ import { useKbStore } from '../../stores/kb';
 import { useUserStore } from '../../stores/user';
 
 export default function KbPage() {
-  const { list, loading, busy, error, fetchList, seedCurriculum, remove } = useKbStore();
+  const { list, loading, busy, error, fetchList, seedCurriculum, remove, createWithDoc, uploadDoc } = useKbStore();
   const user = useUserStore((s) => s.user);
   const stage = user?.current_stage || 'college';
 
@@ -39,13 +39,22 @@ export default function KbPage() {
         </Text>
       </View>
 
-      <Button
-        loading={busy}
-        style={{ backgroundColor: '#10b981', color: '#fff', borderRadius: '9999px', fontSize: '14px', marginBottom: '12px' }}
-        onClick={onSeed}
-      >
-        用「{stage}」课程图谱生成种子库
-      </Button>
+      <View style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        <Button
+          loading={busy}
+          style={{ flex: 1, backgroundColor: '#10b981', color: '#fff', borderRadius: '9999px', fontSize: '13px' }}
+          onClick={onSeed}
+        >
+          「{stage}」种子库
+        </Button>
+        <Button
+          loading={busy}
+          style={{ flex: 1, backgroundColor: '#4F46E5', color: '#fff', borderRadius: '9999px', fontSize: '13px' }}
+          onClick={createWithDoc}
+        >
+          📄 上传文档建库
+        </Button>
+      </View>
 
       {loading && <Text style={{ display: 'block', textAlign: 'center', color: '#9ca3af', padding: '24px' }}>加载中...</Text>}
       {error !== '' && <Text style={{ display: 'block', textAlign: 'center', color: '#ef4444', padding: '12px' }}>{error}</Text>}
@@ -69,13 +78,22 @@ export default function KbPage() {
             )}
           </View>
           {!kb.read_only && (
-            <Button
-              size="mini"
-              style={{ marginTop: '8px', backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '12px' }}
-              onClick={() => onDelete(kb.name)}
-            >
-              删除
-            </Button>
+            <View style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <Button
+                size="mini"
+                style={{ backgroundColor: '#eef2ff', color: '#4F46E5', fontSize: '12px' }}
+                onClick={() => uploadDoc(kb.name)}
+              >
+                上传文档
+              </Button>
+              <Button
+                size="mini"
+                style={{ backgroundColor: '#fee2e2', color: '#b91c1c', fontSize: '12px' }}
+                onClick={() => onDelete(kb.name)}
+              >
+                删除
+              </Button>
+            </View>
           )}
         </View>
       ))}

@@ -105,6 +105,17 @@ async def test_generate_quiz_degrades_to_empty_on_prose():
 
 
 @pytest.mark.asyncio
+async def test_generate_quiz_threads_rag_through():
+    """P3: RAG params reach the chat WS so questions are KB-grounded."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "{}", "session_id": None, "statuses": []}
+        await client.generate_quiz("导数", 3, "college", kb_name="mv_curriculum_college", enable_rag=True)
+        assert mock_chat.call_args.kwargs["kb_name"] == "mv_curriculum_college"
+        assert mock_chat.call_args.kwargs["enable_rag"] is True
+
+
+@pytest.mark.asyncio
 async def test_circuit_breaker_opens():
     client = AgentClient("http://mock:8001")
     client.circuit.failure_threshold = 2
