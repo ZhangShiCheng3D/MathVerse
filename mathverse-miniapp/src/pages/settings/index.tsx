@@ -117,6 +117,14 @@ export default function SettingsPage() {
       >
         保存
       </Button>
+
+      <View
+        style={{ backgroundColor: '#fff', borderRadius: '12px', padding: '14px 16px', marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        onClick={() => Taro.navigateTo({ url: '/pages/memory/index' })}
+      >
+        <Text style={{ fontSize: '14px', color: '#374151' }}>引擎记忆（只读·共享）</Text>
+        <Text style={{ fontSize: '14px', color: '#9ca3af' }}>›</Text>
+      </View>
     </View>
   );
 }

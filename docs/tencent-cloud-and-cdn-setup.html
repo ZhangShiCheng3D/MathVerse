@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>腾讯云 + CDN 配置手册（跨项目复用）</title>
+<style>
+  :root{--bg:#faf7f2;--card:#fff;--border:#e8e0d5;--text:#3d3226;--text2:#9b8c7d;--accent:#c4965c;--red:#d4846b;--green:#7a9e7e}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;line-height:1.8;margin:0;padding:32px 16px}
+  .wrap{max-width:920px;margin:0 auto}
+  h1{font-family:Georgia,serif;font-size:28px;border-bottom:2px dashed var(--border);padding-bottom:12px}
+  h2{font-family:Georgia,serif;font-size:21px;margin-top:40px;padding-left:10px;border-left:4px solid var(--accent)}
+  h3{font-size:16px;margin-top:24px}
+  .meta{color:var(--text2);font-size:13px;margin-bottom:24px}
+  table{border-collapse:collapse;width:100%;margin:14px 0;background:var(--card);font-size:14px}
+  th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:#f3ead9}
+  code{background:#f3ead9;padding:1px 6px;border-radius:4px;font-size:13px;font-family:Consolas,monospace}
+  pre{background:#2d2620;color:#e8dfd2;padding:14px 18px;border-radius:10px;overflow-x:auto;font-size:13px;line-height:1.6}
+  pre code{background:none;color:inherit;padding:0}
+  .warn{background:#fdf3ee;border-left:4px solid var(--red);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .tip{background:#f0f5f0;border-left:4px solid var(--green);padding:10px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+  .pitfall{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:4px 18px;margin:10px 0}
+  .pitfall b{color:var(--red)}
+  .arch{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 20px;font-family:Consolas,monospace;font-size:13px;white-space:pre;overflow-x:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>腾讯云 + CDN 配置手册</h1>
+<div class="meta">沉淀自砚卡（Inkstone）项目的生产实践 · 2026-06 · 供其他项目直接复用<br>
+涉及：ECS / nginx 路径反代 / EdgeOne CDN / COS 对象存储直传 / 短信 / CAM 密钥 / 计费</div>
+
+<h2>0. 账号资产总览</h2>
+<table>
+<tr><th>资产</th><th>值 / 入口</th><th>说明</th></tr>
+<tr><td>腾讯云主账号</td><td>APPID <code>1258541757</code> · UIN <code>100009074630</code></td><td>所有产品同账号计费，认证主体「南京淳纯科技有限公司」</td></tr>
+<tr><td>CAM API 密钥</td><td>控制台 → 访问管理 → <a href="https://console.cloud.tencent.com/cam/capi">API 密钥管理</a></td><td>SecretId/SecretKey，COS·短信·CAM 等所有 API 共用</td></tr>
+<tr><td>ECS 服务器</td><td><code>129.211.224.227</code>（Ubuntu，多项目共享）</td><td>SSH: <code>ssh -i ~/.ssh/id_rsa_tencent ubuntu@129.211.224.227</code></td></tr>
+<tr><td>域名 + SSL</td><td><code>kuangyebar.cn</code>（host nginx 持证书）</td><td>多项目按 URL 路径共享，见 §2</td></tr>
+<tr><td>EdgeOne CDN</td><td><code>www.kuangyebar.cn</code>（CNAME 到边缘）</td><td>静态/媒体加速，见 §3</td></tr>
+<tr><td>COS 对象存储</td><td>bucket <code>yancard-uploads-1258541757</code>（ap-guangzhou）</td><td>大文件直传中转，见 §4</td></tr>
+<tr><td>短信</td><td>SdkAppId <code>1401139844</code> · <a href="https://console.cloud.tencent.com/smsv2">短信控制台</a></td><td>签名「南京淳纯科技有限公司」，见 §5</td></tr>
+<tr><td>充值 / 账单</td><td><a href="https://console.cloud.tencent.com/expense/recharge">费用中心</a></td><td>按量后付费，所有产品从同一余额扣，见 §6</td></tr>
+</table>
+
+<h2>1. CAM 密钥使用原则</h2>
+<ul>
+<li>一对 SecretId/SecretKey 可调全部产品 API（COS、SMS、CAM…），<b>新项目不需要新密钥</b>，直接复用。</li>
+<li>查询账号 APPID（建 COS bucket 必须用）：CAM API <code>GetUserAppId</code>，npm 包 <code>tencentcloud-sdk-nodejs-cam</code>。</li>
+<li>建议（未做，可选）：为每个项目建 CAM 子账号、只授该项目用到的产品权限，泄漏时影响面更小。</li>
+</ul>
+
+<h2>2. ECS + nginx「一台机多项目」路径反代模式</h2>
+<p>一台 ECS、一个域名、一张 SSL 证书，按 <b>URL 路径前缀</b> 挂载多个项目——新项目零成本上线，不用买新域名/证书。</p>
+<div class="arch">用户 ──https──> host nginx (server_name kuangyebar.cn, 持 SSL)
+                ├── /yk/      → 127.0.0.1:3000   (砚卡 API+后台)
+                ├── /xx/      → 127.0.0.1:3001   (其他项目 …)
+                └── /         → 默认站
+每个项目自己跑 Docker Compose，端口只绑 127.0.0.1，不暴露公网。</div>
+<h3>nginx 配置要点</h3>
+<pre><code>location /yk/ {
+    proxy_pass http://127.0.0.1:3000/;   # 注意尾部 / —— 去掉 /yk 前缀转发
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    client_max_body_size 300m;           # 大文件上传必调，默认 1m
+}</code></pre>
+<div class="warn"><b>ECS 带宽是最贵的瓶颈。</b>小水管（几 Mbps）下大文件绝不要流经 ECS——上传走 COS 直传（§4），下载/媒体走 CDN（§3）。带宽计费方向：出向按购买带宽限速，入向 ≤10Mbps 套餐时也被限 10Mbps。</div>
+<div class="tip">Express 在 nginx 后面记得 <code>app.set('trust proxy', 1)</code>，否则限流按 nginx 的 IP 聚合、X-Forwarded-For 告警。</div>
+
+<h2>3. EdgeOne CDN（静态/媒体加速）</h2>
+<p>用途：媒体文件（图片/音频）从边缘节点出流量，不占 ECS 带宽。砚卡用它扛 Anki 牌组媒体。</p>
+<h3>接入步骤</h3>
+<ol>
+<li>EdgeOne 控制台添加站点 → 加速域名用 <b>子域名</b>（如 <code>www.kuangyebar.cn</code>），DNS 把它 CNAME 到 EdgeOne 给的边缘地址。</li>
+<li>源站设 ECS IP（<code>129.211.224.227</code>）。</li>
+<li><b>回源 HOST 改写为主域名</b>（<code>kuangyebar.cn</code>）——见下面坑 #1，最容易翻车的一步。</li>
+<li>缓存规则：按路径匹配（如 <code>/yk/api/media/*</code>），遵循源站 Cache-Control（源站对媒体发长缓存 + immutable）。</li>
+<li>应用侧把媒体基址指到 CDN 域名（砚卡：env <code>PUBLIC_MEDIA_BASE=https://www.kuangyebar.cn/yk/api/media</code>）。</li>
+</ol>
+<h3>EdgeOne 踩坑清单</h3>
+<div class="pitfall"><b>#1 回源 HOST 不改写 → 302 跳登录页。</b>host nginx 的 vhost 只认 <code>server_name kuangyebar.cn</code>（无 www）。CDN 带着 <code>www.</code> 回源会落到默认站。必须在 EdgeOne 配「回源 Host 改写」为主域名。</div>
+<div class="pitfall"><b>#2 绝不能直连 <code>.eo.dnse0.com</code> CNAME 目标。</b>其证书是 <code>*.cdn.myqcloud.com</code>，SAN 不匹配你的域名，TLS 直接握手失败。一律走自己的加速域名。</div>
+<div class="pitfall"><b>#3 本机验证不可信。</b>开发机的代理软件会把边缘域名劫持成 <code>198.18.x.x</code> fake IP。验证 CDN 必须登 ECS 从服务器侧 curl（必要时 <code>--resolve www.域名:443:&lt;边缘IP&gt;</code>）。</div>
+
+<h2>4. COS 对象存储 —— 大文件直传架构</h2>
+<p>用途：用户上传大文件（百 MB 级 PDF）绕过 ECS 小带宽；第三方服务（OCR 等）也直接从 COS 拉文件。<b>ECS 公网全程不过文件字节</b>。</p>
+<div class="arch">App ──预签名 PUT 直传──> COS bucket（公网大带宽，上传流量免费）
+App ──objectKey（几百字节 JSON）──> ECS API
+worker ──同地域内网拉取（免费、百兆+）──> COS
+第三方(OCR等) <──预签名 GET URL，自己拉，COS 出流量 ¥0.5/GB──┘</div>
+<h3>建 bucket（纯 API，控制台都不用开）</h3>
+<pre><code>// npm i cos-nodejs-sdk-v5
+const COS = require('cos-nodejs-sdk-v5');
+const cos = new COS({ SecretId, SecretKey });
+// bucket 名必须带 APPID 后缀
+await cos.putBucket({ Bucket: 'myproj-uploads-1258541757', Region: 'ap-guangzhou' });
+// 生命周期：上传目录 7 天自动删，永不堆积
+await cos.putBucketLifecycle({ Bucket, Region, LifecycleConfiguration: { Rules: [{
+  ID: 'expire-uploads-7d', Status: 'Enabled',
+  Filter: { Prefix: 'uploads/' }, Expiration: { Days: 7 } }] } });</code></pre>
+<h3>预签名 URL（服务端几毫秒，无流量）</h3>
+<pre><code>// PUT（给客户端直传，15 分钟）/ GET（给第三方拉取，2 小时）
+cos.getObjectUrl({ Bucket, Region, Key, Method: 'PUT', Sign: true, Expires: 900 }, cb);
+cos.getObjectUrl({ Bucket, Region, Key, Method: 'GET', Sign: true, Expires: 7200 }, cb);</code></pre>
+<h3>关键事实</h3>
+<table>
+<tr><th>项</th><th>事实</th></tr>
+<tr><td>同地域内网</td><td>ECS↔COS（同为 ap-guangzhou）走内网，<b>免费且不占公网带宽</b>，SDK 自动走内网 DNS</td></tr>
+<tr><td>费用</td><td>存储 ¥0.099/GB/月 · 外网下行 ¥0.5/GB · 上传免费 · 请求 ¥0.01/万次</td></tr>
+<tr><td>客户端直传</td><td>预签名 PUT 不需要任何 SDK，标准 HTTP PUT 即可（RN 用 <code>FileSystem.uploadAsync</code> BINARY_CONTENT）</td></tr>
+<tr><td>地域</td><td><b>必须和 ECS 同地域</b>（广州 ap-guangzhou）才有内网；建 bucket 时定，不可改</td></tr>
+<tr><td>安全</td><td>bucket 私有读写；密钥只在服务端；客户端拿到的预签名 URL 限时限单个对象</td></tr>
+</table>
+<div class="tip"><b>隐藏技巧（实测，官方未文档化）：</b>百度 PaddleOCR AI Studio 任务接口 <code>POST /api/v2/ocr/jobs</code> 支持 JSON 体 <code>{"model":"...","fileUrl":"&lt;COS预签名GET URL&gt;"}</code> 提交，它自己去拉文件——multipart 里塞 fileUrl 字段会报「空文件」，必须 JSON。其他第三方服务接 COS 时优先找有没有 URL 提交模式。</div>
+
+<h2>5. 腾讯云短信（验证码）</h2>
+<h3>开通流程</h3>
+<ol>
+<li><a href="https://console.cloud.tencent.com/smsv2">短信控制台</a> → 应用管理 → 创建应用（秒建免审）→ 得 <b>SdkAppId</b>。</li>
+<li>签名管理 → 申请签名（需资质：营业执照 / 小程序主体 / App 用户协议截图，审核 1-2 小时～1 天）。<b>签名内容必须与控制台一字不差</b>。</li>
+<li>模板管理 → 申请正文模板。<b>记录模板有几个参数</b>——发送时 <code>TemplateParamSet</code> 数组长度必须严格一致，多一个少一个都拒发。</li>
+</ol>
+<h3>找不到签名/模板信息时：用 API 直接查（实测可用）</h3>
+<pre><code>// npm i tencentcloud-sdk-nodejs-sms —— 控制台翻不到就让代码自己说
+const c = new (require('tencentcloud-sdk-nodejs-sms').sms.v20210111.Client)({
+  credential: { secretId, secretKey }, region: 'ap-guangzhou' });
+await c.DescribeSmsTemplateList({ International: 0, Limit: 50, Offset: 0 }); // 全部模板+状态+原文
+await c.DescribeSmsSignList({ International: 0, Limit: 50, Offset: 0 });     // 全部签名+状态</code></pre>
+<h3>发送（Node）</h3>
+<pre><code>await client.SendSms({
+  PhoneNumberSet: ['+86' + phone],
+  SmsSdkAppId: '1401139844',
+  SignName: '南京淳纯科技有限公司',     // 与控制台完全一致
+  TemplateId: '2658508',
+  TemplateParamSet: [code],            // ← 个数 = 模板 {n} 个数，砚卡模板是单参数
+});
+// 返回 SendStatusSet[0].Code !== 'Ok' 视为失败（额度不足/签名模板不匹配都在这暴露）</code></pre>
+<h3>服务端防滥用三件套（砚卡现成实现可抄）</h3>
+<ul>
+<li>重发冷却 60s/号 + 每号每天 10 条 + 验证码 5 分钟过期（Redis 存储，<code>server/src/services/codeStore.ts</code>）</li>
+<li>auth 路由独立限流（5min/10 次/IP）</li>
+<li>生产随机 6 位码；本地未配密钥时固定 <code>123456</code> 走日志，开发不耗短信</li>
+</ul>
+<div class="warn">短信按条扣账号余额（国内约 ¥0.045/条，新账号可能需先购最小套餐包）。<b>余额耗尽 = 全体用户无法登录</b>，务必设余额告警（§6）。</div>
+
+<h2>6. 计费与充值</h2>
+<table>
+<tr><th>事项</th><th>入口 / 做法</th></tr>
+<tr><td>充值</td><td>控制台右上「费用」→ <a href="https://console.cloud.tencent.com/expense/recharge">充值</a>（按量后付费，先用后扣）</td></tr>
+<tr><td>分产品账单</td><td>费用中心 → 账单详情，按 COS / 短信 / CVM 分项</td></tr>
+<tr><td><b>余额告警（必设）</b></td><td>费用中心 → 预算管理 → 余额低于阈值（如 ¥50）短信提醒</td></tr>
+<tr><td>本项目量级参考</td><td>短信 ¥0.045/条 · COS 单本 100MB 扫描书全流程 ≈ ¥0.05 · CDN 流量另计（EdgeOne 套餐）</td></tr>
+</table>
+
+<h2>7. 通用踩坑清单（跨项目都会遇到）</h2>
+<div class="pitfall"><b>#1 compose 显式 env 透传：</b>docker-compose 用 <code>environment:</code> 列举变量时，<code>.env</code> 新增的变量<b>不会自动进容器</b>，必须在 compose 里补 <code>VAR: ${VAR:-}</code>。且 compose 里的默认值（如 <code>${X:-120}</code>）会<b>盖掉代码内默认值</b>——代码改默认后要同步 compose。</div>
+<div class="pitfall"><b>#2 127.0.0.1 vs localhost：</b>开发机代理常监听 127.0.0.1:7890 并劫持 127.0.0.1 流量返回 502，本地服务一律用 <code>localhost</code> 连。</div>
+<div class="pitfall"><b>#3 Windows 终端发中文 JSON 会变 GBK 乱码：</b>git-bash/PowerShell 里 curl 提交中文 body，服务端收到乱码——测试中文参数用文件（<code>-d @body.json</code>，文件存 UTF-8）或让真实客户端发。</div>
+<div class="pitfall"><b>#4 GitHub 单文件 100MB 硬限：</b>教材 PDF/apkg 这类大素材入库必须 Git LFS（免费档 1GB 存储 + 1GB/月下载带宽）。</div>
+<div class="pitfall"><b>#5 验证 CDN/边缘域名必须从 ECS 侧：</b>本机代理会把域名劫持成 198.18.x fake IP，本机 curl 结果不可信。</div>
+
+<h2>8. 新项目接入 Checklist</h2>
+<ol>
+<li>☐ 复用 CAM 密钥（或为新项目建子账号）</li>
+<li>☐ ECS：新项目 Docker Compose 绑 127.0.0.1 新端口 → host nginx 加 <code>location /newproj/</code> 反代（带尾 / 去前缀）→ 复用现有 SSL</li>
+<li>☐ 大文件上传？→ 同地域建 COS bucket（API 三行代码，§4）+ 生命周期规则 + 预签名直传</li>
+<li>☐ 媒体/静态量大？→ EdgeOne 加缓存规则（注意回源 Host 改写）</li>
+<li>☐ 要短信？→ 同应用复用 SdkAppId + 申请新模板即可（签名通用）</li>
+<li>☐ Express 设 <code>trust proxy</code>；nginx 调 <code>client_max_body_size</code></li>
+<li>☐ 费用中心确认余额告警覆盖新增消耗</li>
+</ol>
+
+<div class="meta" style="margin-top:40px;border-top:2px dashed var(--border);padding-top:14px">
+关联文档：<code>docs/high-concurrency-and-edgeone-setup.html</code>（并发硬化细节）· <code>docs/pdf-ocr-and-backend-generation.html</code>（OCR 链路）· 项目 CLAUDE.md「生产部署」节
+</div>
+
+</div>
+</body>
+</html>

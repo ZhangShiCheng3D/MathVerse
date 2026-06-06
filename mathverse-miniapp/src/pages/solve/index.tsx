@@ -82,7 +82,19 @@ export default function SolvePage() {
             </Button>
           )}
         </View>
-        {error && <Text style={{ color: '#ef4444', fontSize: '14px', marginTop: '4px' }}>{error}</Text>}
+        {error && (
+          <View style={{ marginTop: '4px' }}>
+            <Text style={{ color: '#ef4444', fontSize: '14px' }}>{error}</Text>
+            {/会员|额度|上限/.test(error) && (
+              <Text
+                onClick={() => Taro.navigateTo({ url: '/pages/membership/index' })}
+                style={{ color: '#4F46E5', fontSize: '14px', marginLeft: '8px', textDecoration: 'underline' }}
+              >
+                去开通会员 ›
+              </Text>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Streaming / loading */}

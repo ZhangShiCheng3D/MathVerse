@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MathVerse 对 DeepTutor 能力利用度系统性审查 · 2026-06-03</title>
+<style>
+  :root{--ink:#1f2430;--muted:#6b7280;--line:#e5e7eb;--accent:#4F46E5;--bg:#fbfbfd;
+        --ok:#0f9d58;--warn:#d98a00;--bad:#d23f31;--gray:#9aa0aa;}
+  *{box-sizing:border-box}
+  body{font:15px/1.7 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+       color:var(--ink);background:var(--bg);margin:0;padding:0}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 28px 80px}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-.3px}
+  .sub{color:var(--muted);margin:0 0 28px;font-size:14px}
+  h2{font-size:20px;margin:42px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:16px;margin:26px 0 8px}
+  p{margin:10px 0}
+  code{background:#eef0f4;border-radius:4px;padding:1px 5px;font:13px/1.5 "SF Mono",Consolas,monospace}
+  .lead{background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent);
+        border-radius:8px;padding:16px 20px;margin:18px 0}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13.5px;background:#fff}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f3f4f8;font-weight:600}
+  .tag{display:inline-block;border-radius:20px;padding:1px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+  .t-ok{background:#e6f4ea;color:var(--ok)}
+  .t-part{background:#fdf3e0;color:var(--warn)}
+  .t-no{background:#fde8e6;color:var(--bad)}
+  .t-na{background:#eef0f4;color:var(--gray)}
+  .score{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .card{flex:1;min-width:170px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card .n{font-size:30px;font-weight:700;color:var(--accent);line-height:1}
+  .card .l{color:var(--muted);font-size:13px;margin-top:6px}
+  ul{margin:8px 0;padding-left:22px}li{margin:4px 0}
+  .ref{color:var(--muted);font-size:12px;font-family:"SF Mono",Consolas,monospace}
+  .callout{border-radius:8px;padding:14px 18px;margin:16px 0}
+  .c-warn{background:#fff8ec;border:1px solid #f0d9a8}
+  .c-bad{background:#fdecea;border:1px solid #f2c2bc}
+  .foot{margin-top:50px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>MathVerse 对 DeepTutor 能力利用度 · 系统性审查</h1>
+<p class="sub">审查日期 2026-06-03 · 分支 <code>feat/deeptutor-full-integration</code> (PR #15, 未合并) · 对照基准：DeepTutor 真实 24 路由表面（<code>deeptutor/api/main.py</code>）</p>
+
+<div class="lead">
+<strong>一句话结论：</strong>PR #15 把 DeepTutor 的利用度从"只调 <code>/chat</code> 且连 mode 都被引擎忽略"（约 15%）拉到了
+<strong>覆盖约 75% 的有价值表面</strong>。剩余未用的部分大多是<strong>有意为之</strong>（co_writer/tutorbot 全局态无法多租户隔离）或
+<strong>被外部条件卡住</strong>（question/generate 缺真实语料、web_search 默认关闭）。
+<br><br>
+<strong>但真正的风险不在"用了多少"，而在"用了的能不能跑"</strong>——PR #15 新接的全部能力（vision/judge/turn 运行时/RAG/visualize）
+按仓库约定<strong>仅做了静态验证，从未对活引擎端到端跑通</strong>。当前线上真正被验证可用的，只有 PR #1 时代的 chat/deep/quick 一条路径。
+</div>
+
+<div class="score">
+  <div class="card"><div class="n">9 / 24</div><div class="l">路由表面已实际接入</div></div>
+  <div class="card"><div class="n">~75%</div><div class="l">"有价值能力"覆盖度（估）</div></div>
+  <div class="card"><div class="n">4</div><div class="l">值得复议的真实欠用点<br><span style="color:var(--ok);font-size:11px">（原 6，本轮已解决 2）</span></div></div>
+  <div class="card"><div class="n">1</div><div class="l">已接入但未活引擎验证的整批能力</div></div>
+</div>
+
+<h2>1. DeepTutor 全表面 × MathVerse 利用度对照</h2>
+<p>DeepTutor 在 <code class="ref">deeptutor/api/main.py:296-375</code> 共挂载 24 个 router。逐一核对 MathVerse 是否调用、调用是否充分：</p>
+
+<table>
+<thead><tr><th>DeepTutor 能力</th><th>状态</th><th>MathVerse 接入点 / 说明</th></tr></thead>
+<tbody>
+<tr><td><code>chat</code> /api/v1/chat (WS)</td><td><span class="tag t-part">部分</span></td>
+<td>deep/quick 解题、讲解、出题均走此路。<strong>但引擎忽略 <code>mode</code> 字段</strong>，真实杠杆是 kb_name+enable_rag、enable_web_search。<span class="ref">agent_client.py / deeptutor_ws.py:89</span></td></tr>
+
+<tr><td><code>vision-solver</code> /vision/solve · /vision/analyze</td><td><span class="tag t-ok">已用</span></td>
+<td>拍照解题 + 图像→GeoGebra 可视化。<span class="ref">solve.py /vision /visualize</span></td></tr>
+
+<tr><td><code>question</code> /question/judge (WS)</td><td><span class="tag t-part">部分</span></td>
+<td>批改走 judge。<strong>原生 <code>question/generate</code> 未用</strong>——出题改用 chat 提示词塞 JSON，丢失 RAG 接地与结构化保证。<span class="ref">agent_client.py:257 generate_quiz</span></td></tr>
+
+<tr><td><code>knowledge</code> /knowledge/*</td><td><span class="tag t-ok">已用</span></td>
+<td>RAG 知识库 BFF（list/create/upload/delete/reindex/seed）。<span class="ref">routes/kb.py · deeptutor/rest.py:19</span></td></tr>
+
+<tr><td><code>unified_ws</code> /ws（turn 运行时）</td><td><span class="tag t-part">部分</span></td>
+<td>智能体导师 <code>/ws/tutor</code>，含 ask_user 交互环。<strong>仅暴露 4 个 capability（chat/solve/research/visualize），未传 tools、未暴露 regenerate</strong>。<span class="ref">tutor.py:38 · turn.py:56</span></td></tr>
+
+<tr><td><code>notebook</code> · <code>book</code> · <code>dashboard</code> · <code>memory</code></td><td><span class="tag t-ok">已用</span></td>
+<td>笔记本 / AI 教材生成 / 活动流 / 全局记忆只读巡查（默认关）。<span class="ref">routes/notebook,book,dashboard,memory.py</span></td></tr>
+
+<tr><td><code>co_writer</code></td><td><span class="tag t-na">有意不用</span></td>
+<td>已文档化弃用：全局态，无法按租户隔离，对考试数学价值低。</td></tr>
+
+<tr><td><code>tutorbot</code></td><td><span class="tag t-na">有意不用</span></td>
+<td>同上，全局单例 + ROLE 门控，与多租户冲突。</td></tr>
+
+<tr><td><code>attachments</code> /api/attachments</td><td><span class="tag t-no">未用</span></td>
+<td><strong>真实缺口</strong>：chat/turn 无法挂 PDF/文档附件，只能内联图片走 vision。对"教材/导师"型产品是被遗漏的输入面（如上传一张试卷 PDF 进导师对话）。</td></tr>
+
+<tr><td><code>capabilities</code> /capabilities</td><td><span class="tag t-no">未用</span></td>
+<td>能力发现端点。前端硬编码 4 个 capability（<code>tutor/index.tsx:6</code>），引擎能力增减时 MathVerse 不感知。</td></tr>
+
+<tr><td><code>skills</code> · <code>tools</code></td><td><span class="tag t-no">未用</span></td>
+<td>引擎的 agent 技能/工具注册表。turn 支持按 <code>tools</code> 选择/约束，MathVerse 从不传，等于让导师默认全工具裸跑。</td></tr>
+
+<tr><td><code>question-notebook</code></td><td><span class="tag t-na">有意不用</span></td>
+<td>合理替代：MathVerse 自建 <code>MistakeNotebook</code> + FSRS（DeepTutor 没有的中国应试域逻辑）。</td></tr>
+
+<tr><td><code>multi-user</code> · <code>sessions</code></td><td><span class="tag t-na">有意不用</span></td>
+<td>MathVerse 自管鉴权 + <code>mv_{uid}_</code> 命名租户 + DtResource 归属表；DeepTutor 跑 <code>ENABLE_AUTH=false</code>，用其自带 multi-user 反而冲突。</td></tr>
+
+<tr><td><code>auth</code>·<code>settings</code>·<code>system</code>·<code>plugins</code>·<code>agent-config</code></td><td><span class="tag t-na">不适用</span></td>
+<td>引擎内部管理面，正确地不对外暴露。</td></tr>
+</tbody>
+</table>
+
+<h2>2. 值得复议的真实欠用点（按 ROI 排序）</h2>
+
+<h3>① enable_web_search：全链路接通却被全局开关锁死　<span class="tag t-ok">本轮已解决</span></h3>
+<p>该参数原只受全局配置 <code>deeptutor_enable_web_search</code>（默认 <code>False</code>）控制，从未暴露为请求级选项。
+<strong>已修复：</strong><code>deep_solve / quick_solve / deep_solve_stream</code> 新增 <code>enable_web_search</code> 覆盖参数，
+语义为 <code>全局floor OR 本次opt-in</code>（只能开不能关，默认零变化）；<code>SolveRequest.use_web</code> 与 <code>/ws/solve</code> init 的 <code>use_web</code>
+透传到 <code>/deep · /quick · /ws/solve</code>。测试 <code>test_deep_solve_web_search_opt_in_threads_through</code>。
+<span class="ref">agent_client.py · solve.py · solve_ws.py</span><br>
+（前端 UI 开关刻意未加——对纯应试数学价值低、有幻觉风险，留作产品决策；API 焊死已解除。）</p>
+
+<h3>② 原生 question/generate 缺位 → 出题降级为提示词工程</h3>
+<p><code>generate_quiz</code> 用 chat WS + JSON 提示块重新实现出题（<code class="ref">agent_client.py:257-270</code>），
+绕过了引擎原生的题目生成契约与 RAG 接地。后果：题目无法"基于上传教材语料"出题、结构不保证、解析靠正则兜底（无 JSON 则返回空列表）。
+文档已承认此为延期项（"needs real教材 corpus"）——属外部语料阻塞，非纯工程缺口。</p>
+
+<h3>③ turn 运行时只用了约 60%</h3>
+<ul>
+<li><strong>capability 子集</strong>：仅 4 个，引擎 capability 注册表（<code>deeptutor.capabilities.request_contracts</code>）更大；deep_research、quiz 等未透出。</li>
+<li><strong>tools 从不传</strong>：<code>turn.start_turn</code> 支持 <code>tools=</code> 选择/约束工具集，tutor 路由（<code>tutor.py:97</code>）从不传 → 无法做"只用计算器/只用绘图"这类受控导师。</li>
+<li><strong>regenerate</strong>　<span class="tag t-ok">本轮已解决</span>：<code>/ws/tutor</code> 现支持 init <code>{type:"regenerate", session_id}</code> → 走 <code>conn.regenerate(scoped_session)</code>；前端抽出共享 <code>openTurnSocket</code> 助手 + 会话栏"重答"按钮。测试 <code>test_tutor_regenerate_reruns_session / _requires_session</code>。<span class="ref">tutor.py · stores/tutor.ts</span></li>
+</ul>
+
+<h3>④ attachments：文档输入面缺失</h3>
+<p>见上表。对已经做了 AI 教材（book）和笔记本（notebook）的产品定位，"把一份 PDF 试卷/讲义喂给导师"是顺理成章的下一步，目前无路可走。</p>
+
+<h3>⑤ capabilities 发现端点未用 → 前后端能力清单硬编码漂移风险</h3>
+<p>低优先，但属技术债：引擎升级能力时前端不会自动跟随。</p>
+
+<h2>3. 有意且正确的"不用"（无需整改）</h2>
+<ul>
+<li><code>co_writer</code> / <code>tutorbot</code>——全局态，多租户下会串户，弃用决策正确。</li>
+<li><code>multi-user</code> / <code>sessions</code> CRUD——MathVerse 自管鉴权与会话归档，复用引擎的反而引入冲突。</li>
+<li><code>question-notebook</code>——被自研 MistakeNotebook + FSRS 取代，这正是 MathVerse 相对 DeepTutor 的差异化价值（中国应试域）。</li>
+<li>引擎管理面（settings/system/plugins/agent-config）——理应内网隔离，不暴露。</li>
+</ul>
+
+<h2>4. 最大风险：用了的能力≠验证过的能力</h2>
+<div class="callout c-bad">
+<strong>"利用度"有两个维度，第二个维度目前几乎为零。</strong><br>
+按 CLAUDE.md / PR #2 约定，PR #15 新接的<strong>全部</strong> DeepTutor 能力——vision/solve、question/judge、turn 运行时（含 ask_user 事件名）、
+RAG 知识库上传与检索、visualize、以及高并发补丁的 PG/Redis/F1-F2-G1 修复——<strong>都只做了静态验证</strong>（锚点唯一、能 import、能 compile），
+<strong>从未对真实 DeepTutor 引擎跑过端到端</strong>。线上 <code>kuangyebar.cn</code> 真正验证可用的，仍只有 PR #1 的 chat→deep/quick 一条路。
+<br><br>
+也就是说：账面上"接入了 75%"，可活引擎验证过的可能不到 20%。<strong>合并 PR #15 前的真机验证 pass 是第一优先，远高于去补上面那些欠用点。</strong>
+</div>
+
+<h2>5. 建议（按优先级）</h2>
+<div class="callout c-warn">
+<strong>P0 · 先验证已接入的</strong>：按 PR #15 checklist 跑活引擎端到端——ask_user 事件名、judge 返回格式、KB 上传/RAG 命中、visualize、turn 运行时多轮。这决定"75%"是真是假。<br><br>
+<strong>P1 · 低成本补强　<span style="color:var(--ok)">✓ 本轮已完成</span></strong>：<code>enable_web_search</code> opt-in 解锁 + turn <code>regenerate</code> 透出（含前端按钮），均附 mock 测试，141 pytest / 22 vitest / build:h5 全绿。<br><br>
+<strong>P2 · 产品向新表面</strong>：接 <code>attachments</code>（文档→导师/笔记本），让 book/notebook 闭环；按 <code>tools</code> 做受控导师。<br><br>
+<strong>P3 · 待外部条件</strong>：真实教材语料到位后，用原生 <code>question/generate</code> 替换提示词出题；<code>capabilities</code> 端点做能力发现。<br><br>
+<strong>不动</strong>：co_writer / tutorbot / multi-user / question-notebook——维持现有有意决策。
+</div>
+
+<div class="foot">
+审查方法：对照 DeepTutor 真实路由表（<code>deeptutor-src-analysis/</code> 本地副本）逐项核验 MathVerse <code>app/services/deeptutor/</code> + <code>app/routes/</code> 的实际调用，所有结论附 <code>file:line</code> 证据。本文档未修改任何代码，仅为审查报告。<br>
+生成：Claude Code · 2026-06-03 · 置于仓库 <code>docs/</code> 约定目录。
+</div>
+
+</div>
+</body>
+</html>

@@ -20,6 +20,18 @@ async def test_deep_solve_maps_answer():
 
 
 @pytest.mark.asyncio
+async def test_deep_solve_web_search_opt_in_threads_through():
+    """use_web override turns web search on; default leaves the global floor (off in tests)."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "x", "session_id": None, "statuses": []}
+        await client.deep_solve("q", "college")
+        assert mock_chat.call_args.kwargs["enable_web_search"] is False
+        await client.deep_solve("q", "college", enable_web_search=True)
+        assert mock_chat.call_args.kwargs["enable_web_search"] is True
+
+
+@pytest.mark.asyncio
 async def test_deep_solve_parses_structured_json():
     client = AgentClient("http://mock:8001")
     prose = (
@@ -93,6 +105,17 @@ async def test_generate_quiz_degrades_to_empty_on_prose():
 
 
 @pytest.mark.asyncio
+async def test_generate_quiz_threads_rag_through():
+    """P3: RAG params reach the chat WS so questions are KB-grounded."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as mock_chat:
+        mock_chat.return_value = {"answer": "{}", "session_id": None, "statuses": []}
+        await client.generate_quiz("导数", 3, "college", kb_name="mv_curriculum_college", enable_rag=True)
+        assert mock_chat.call_args.kwargs["kb_name"] == "mv_curriculum_college"
+        assert mock_chat.call_args.kwargs["enable_rag"] is True
+
+
+@pytest.mark.asyncio
 async def test_circuit_breaker_opens():
     client = AgentClient("http://mock:8001")
     client.circuit.failure_threshold = 2
@@ -145,6 +168,53 @@ async def test_admission_gate_releases_slot_after_call():
         for _ in range(3):  # would deadlock on slot 2 if release were missing
             assert await client.quick_solve("1+1=?", "college") == "ok"
     assert client._inflight._value == 1  # slot returned
+
+
+@pytest.mark.asyncio
+async def test_vision_solve_delegates_to_ws():
+    """Photo solve now goes through DeepTutor's vision WS, not DashScope."""
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.vision_solve", new_callable=AsyncMock) as m:
+        m.return_value = {"answer": "x=1"}
+        assert await client.vision_solve("解题", "BASE64") == "x=1"
+        assert m.call_args.kwargs["image_base64"] == "BASE64"
+
+
+@pytest.mark.asyncio
+async def test_judge_returns_feedback():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.judge", new_callable=AsyncMock) as m:
+        m.return_value = {"feedback": "✅ 正确"}
+        assert await client.judge("2*2=?", "4", correct_answer="4") == "✅ 正确"
+
+
+@pytest.mark.asyncio
+async def test_explain_and_similar_use_chat_ws():
+    client = AgentClient("http://mock:8001")
+    with patch("app.services.deeptutor_ws.chat", new_callable=AsyncMock) as m:
+        m.return_value = {"answer": "因为...", "session_id": None, "statuses": []}
+        assert await client.explain_step("题背景", "这一步") == "因为..."
+        assert m.call_args.kwargs["mode"] == "chat"
+        assert await client.similar_question("原题", "gs-1.1") == "因为..."
+
+
+@pytest.mark.asyncio
+async def test_visualize_wraps_base64_and_delegates(monkeypatch):
+    """Image is normalized to a data URI before hitting /vision/analyze."""
+    from app.services.deeptutor import rest
+    client = AgentClient("http://mock:8001")
+    captured = {}
+
+    async def fake(question, image_base64=None, image_url=None, session_id=None):
+        captured["q"] = question
+        captured["img"] = image_base64
+        return {"final_ggb_commands": [], "ggb_script": None}
+
+    monkeypatch.setattr(rest, "vision_analyze", fake)
+    out = await client.visualize("画三角形", "iVBORabc")
+    assert captured["q"] == "画三角形"
+    assert captured["img"].startswith("data:image/png;base64,")
+    assert "final_ggb_commands" in out
 
 
 def test_solve_result_dataclass():

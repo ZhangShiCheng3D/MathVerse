@@ -15,13 +15,32 @@ class Settings(BaseSettings):
     deeptutor_url: str = "http://deeptutor:8001"
     # Admission control toward DeepTutor: cap concurrent in-flight calls so a
     # surge sheds onto the DeepSeek degrade path instead of overloading the engine.
-    deeptutor_max_concurrency: int = 64
+    # Default 128: this path is I/O-bound (waits on external LLM APIs), so ~5000
+    # DAU peak in-flight fits comfortably; raise via DEEPTUTOR_MAX_CONCURRENCY if
+    # the engine has headroom, lower it if the engine starts timing out.
+    deeptutor_max_concurrency: int = 128
     deeptutor_admission_timeout: float = 8.0
+    # Global daily LLM-spend guardrail (cost_guard.py). Estimated tokens/day
+    # summed across ALL users — a coarse runaway/abuse circuit, not billing.
+    # 0 = disabled (default — no behavior change). Size it from your numbers:
+    #   hard ≈ DAU × solves/user/day × ~3000 tokens/solve × 1.5 safety factor.
+    # e.g. 5000 × 20 × 3000 × 1.5 ≈ 450M → daily_token_budget_hard=450000000,
+    # soft ≈ 0.7 × hard. Over hard: NEW free/anon solves shed (503); paid never
+    # blocked. Over soft: only flagged in /api/metrics.
+    daily_token_budget_soft: int = 0
+    daily_token_budget_hard: int = 0
+    # Full-engine integration knobs. RAG is enabled per-request when a knowledge
+    # base name is supplied; this is the optional default KB for grounded
+    # solve/chat, and a global toggle for DuckDuckGo web search.
+    deeptutor_default_kb: str = ""
+    deeptutor_enable_web_search: bool = False
+    # DeepTutor's long-term memory is a SINGLE GLOBAL workbench (fixed-enum doc
+    # keys, no per-user dimension), so it can't be tenant-isolated by naming.
+    # Exposed only as a READ-ONLY shared inspector and OFF by default — flip to
+    # true only if an operator accepts that all users see the same engine memory.
+    deeptutor_memory_enabled: bool = False
     deepseek_api_key: str = ""
     qwen_api_key: str = ""
-    # DashScope (Alibaba) — multimodal vision for photo-solving (qwen-vl).
-    dashscope_api_key: str = ""
-    vision_model: str = "qwen-vl-max"
     math_ocr_api_key: str = ""
     wechat_app_id: str = ""
     wechat_app_secret: str = ""

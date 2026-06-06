@@ -224,8 +224,8 @@ def test_prepay_rejects_unknown_plan(auth):
 
 def test_grade_correct_updates_mastery(auth):
     uid, headers = auth
-    with patch("app.services.deepseek.chat", new_callable=AsyncMock) as m:
-        m.return_value = '{"correct": true, "feedback": "答案正确"}'
+    with patch("app.routes.learn.agent_client.judge", new_callable=AsyncMock) as m:
+        m.return_value = "✅ 答案正确，思路清晰"
         resp = client.post("/api/learn/exercise/grade", headers=headers, json={
             "kp_id": "gs-5.1", "question": "1+1=?", "user_answer": "2",
         })
@@ -237,8 +237,8 @@ def test_grade_correct_updates_mastery(auth):
 
 def test_grade_incorrect(auth):
     _, headers = auth
-    with patch("app.services.deepseek.chat", new_callable=AsyncMock) as m:
-        m.return_value = '{"correct": false, "feedback": "计算错误"}'
+    with patch("app.routes.learn.agent_client.judge", new_callable=AsyncMock) as m:
+        m.return_value = "❌ 计算错误，第二步符号搞错了"
         resp = client.post("/api/learn/exercise/grade", headers=headers, json={
             "kp_id": "gs-5.2", "question": "2*2=?", "user_answer": "5",
         })

@@ -72,6 +72,39 @@ export default function HomePage() {
         ))}
       </View>
 
+      {/* AI capability cards (detail pages) */}
+      <View style={{ display: 'flex', flexWrap: 'wrap', padding: '0 16px', gap: '12px' }}>
+        {[
+          { icon: '🤖', label: 'AI 导师', desc: '多轮·研究', path: '/pages/tutor/index' },
+          { icon: '📐', label: '可视化', desc: '几何作图', path: '/pages/visualize/index' },
+          { icon: '📚', label: '知识库', desc: '溯源问答', path: '/pages/kb/index' },
+          { icon: '📓', label: '笔记本', desc: '收藏摘要', path: '/pages/notebook/index' },
+          { icon: '💬', label: '导师历史', desc: '历史对话', path: '/pages/activity/index' },
+          { icon: '📕', label: 'AI 教材', desc: '一句生成', path: '/pages/book/index' },
+        ].map((item) => (
+          <View
+            key={item.label}
+            style={{
+              flex: 1,
+              minWidth: '28%',
+              padding: '16px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '12px',
+              textAlign: 'center',
+            }}
+            onClick={() => Taro.navigateTo({ url: item.path })}
+          >
+            <Text style={{ fontSize: '24px' }}>{item.icon}</Text>
+            <Text style={{ display: 'block', fontWeight: 'bold', marginTop: '4px' }}>
+              {item.label}
+            </Text>
+            <Text style={{ display: 'block', fontSize: '12px', color: '#9ca3af' }}>
+              {item.desc}
+            </Text>
+          </View>
+        ))}
+      </View>
+
       {/* Slogan */}
       <View style={{ textAlign: 'center', padding: '32px 0' }}>
         <Text style={{ fontSize: '16px', color: '#6b7280' }}>

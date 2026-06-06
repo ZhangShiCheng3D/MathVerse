@@ -24,8 +24,16 @@ chat.py await the store directly (async), removing even this brief main-loop blo
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import os
 import threading
 from typing import Any
+
+# chat.py calls these SYNCHRONOUSLY from the worker's main event loop, so this
+# bridge blocks that loop until the PG op returns. Bound the wait: a slow/down
+# Postgres must surface as a chat error, never hang the whole worker (which would
+# stall every other request on it — the opposite of the high-concurrency goal).
+_BRIDGE_TIMEOUT = float(os.environ.get("DEEPTUTOR_PG_BRIDGE_TIMEOUT", "30"))
 
 
 class _LoopThread:
@@ -42,8 +50,15 @@ class _LoopThread:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def run(self, coro: Any) -> Any:
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+    def run(self, coro: Any, timeout: float = _BRIDGE_TIMEOUT) -> Any:
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return future.result(timeout)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise RuntimeError(
+                "chat session store timed out (Postgres slow/unreachable)"
+            ) from exc
 
 
 _bridge: _LoopThread | None = None

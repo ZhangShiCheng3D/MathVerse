@@ -16,6 +16,7 @@ from app.middleware.auth_middleware import decode_token
 from app.middleware.content_filter import filter_text
 from app.models.all import User
 from app.services.agent_client import agent_client, AgentUnavailableError
+from app.services.deeptutor import tenancy
 from app.services.quota import enforce_solve_quota, touch_activity
 from app.services.analytics import log_event
 from app.routes.solve import _fallback_solve, _archive_solve
@@ -62,10 +63,22 @@ async def solve_stream(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": e.detail, "code": 429})
                 return
 
+        # RAG grounding (opt-in via the init message), tenancy-scoped per user.
+        kb_name, enable_rag = None, False
+        if init.get("use_rag"):
+            enable_rag = True
+            req_kb = init.get("kb_name")
+            kb_name = (tenancy.scope(user.id, req_kb) if req_kb and user
+                       else tenancy.scope("curriculum", stage))
+
+        use_web = bool(init.get("use_web"))
+
         degraded = False
         payload = None
         try:
-            async for kind, content in agent_client.deep_solve_stream(question, stage):
+            async for kind, content in agent_client.deep_solve_stream(
+                question, stage, kb_name=kb_name, enable_rag=enable_rag,
+                enable_web_search=use_web):
                 if kind == "chunk":
                     await websocket.send_json({"type": "chunk", "content": content})
                 elif kind == "result":

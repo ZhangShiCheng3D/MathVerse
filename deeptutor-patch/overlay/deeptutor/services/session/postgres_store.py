@@ -138,12 +138,16 @@ def _rowcount(tag: str) -> int:
 class PostgresSessionStore:
     """Persist unified chat sessions, turns, messages and the seq'd event log."""
 
-    def __init__(self, dsn: str | None = None, *, min_size: int = 1, max_size: int = 20) -> None:
+    def __init__(self, dsn: str | None = None, *, min_size: int = 1, max_size: int = 20,
+                 command_timeout: float = 30.0) -> None:
         self._dsn = dsn or os.environ.get("DEEPTUTOR_PG_DSN")
         if not self._dsn:
             raise RuntimeError("PostgresSessionStore requires DEEPTUTOR_PG_DSN")
         self._min_size = min_size
         self._max_size = max_size
+        # Bound every statement so a stuck query can't hang a worker indefinitely
+        # (the face-B sync bridge blocks the main loop on these calls).
+        self._command_timeout = command_timeout
         self._pool: asyncpg.Pool | None = None
         self._init_lock = asyncio.Lock()
 
@@ -158,7 +162,8 @@ class PostgresSessionStore:
         async with self._init_lock:
             if self._pool is None:
                 pool = await asyncpg.create_pool(
-                    self._dsn, min_size=self._min_size, max_size=self._max_size
+                    self._dsn, min_size=self._min_size, max_size=self._max_size,
+                    command_timeout=self._command_timeout,
                 )
                 async with pool.acquire() as conn:
                     await conn.execute(_SCHEMA)
@@ -565,6 +570,22 @@ class PostgresSessionStore:
                 "UPDATE turns SET status = $1, error = $2, updated_at = $3, finished_at = $4 "
                 "WHERE id = $5",
                 status, error or "", now, finished_at, turn_id,
+            )
+        return _rowcount(tag) > 0
+
+    async def touch_turn(self, turn_id: str) -> bool:
+        """Owner liveness heartbeat: bump updated_at while the turn is still running.
+
+        Lets a foreign tailer's staleness check reflect REAL owner liveness rather
+        than mere event activity — without this, a turn that runs a long quiet step
+        (no streamed events for > the tailer's stale window) gets wrongly failed by a
+        non-owning replica. Only the running owner calls this (turn_runtime _run_turn).
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            tag = await conn.execute(
+                "UPDATE turns SET updated_at = $1 WHERE id = $2 AND status = 'running'",
+                time.time(), turn_id,
             )
         return _rowcount(tag) > 0
 

@@ -13,6 +13,9 @@ from dataclasses import dataclass
 import websockets
 from app.config import settings
 from app.services import deeptutor_ws
+from app.services import metrics
+from app.services.deeptutor import rest
+from app.services.deeptutor.transport import RestError
 
 logger = logging.getLogger(__name__)
 
@@ -122,14 +125,17 @@ class AgentClient:
             await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
         except asyncio.TimeoutError:
             awaitable.close()
+            metrics.inc("admission_saturation_total")
             raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
         try:
+            metrics.inc("external_call_total")
             result = await awaitable
             self.circuit.record_success()
             return result
-        except (deeptutor_ws.WSStreamError, OSError, asyncio.TimeoutError,
+        except (deeptutor_ws.WSStreamError, RestError, OSError, asyncio.TimeoutError,
                 websockets.WebSocketException) as e:
             self.circuit.record_failure()
+            metrics.inc("external_error_total")
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
         finally:
             self._inflight.release()
@@ -143,26 +149,35 @@ class AgentClient:
             await asyncio.wait_for(self._inflight.acquire(), timeout=self._admission_timeout)
         except asyncio.TimeoutError:
             await agen.aclose()
+            metrics.inc("admission_saturation_total")
             raise AgentUnavailableError("DeepTutor overloaded (admission timeout)")
         try:
+            metrics.inc("external_call_total")
             async for item in agen:
                 yield item
             self.circuit.record_success()
-        except (deeptutor_ws.WSStreamError, OSError, asyncio.TimeoutError,
+        except (deeptutor_ws.WSStreamError, RestError, OSError, asyncio.TimeoutError,
                 websockets.WebSocketException) as e:
             self.circuit.record_failure()
+            metrics.inc("external_error_total")
             raise AgentUnavailableError(f"DeepTutor unavailable: {e}") from e
         finally:
             self._inflight.release()
 
-    async def deep_solve_stream(self, question: str, stage: str):
+    async def deep_solve_stream(self, question: str, stage: str, *,
+                                kb_name: str | None = None, enable_rag: bool = False,
+                                enable_web_search: bool | None = None):
         """Streaming deep-solve: yields ('chunk', delta) then ('result', SolveResult)."""
         message = (
             f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
             f"{_SOLVE_SCHEMA_HINT}\n\n题目：\n{question}"
         )
         async for kind, content in self._guarded_stream(
-            deeptutor_ws.chat_stream(message, mode="solve", timeout=90.0)
+            deeptutor_ws.chat_stream(
+                message, mode="solve", timeout=90.0,
+                kb_name=kb_name, enable_rag=enable_rag,
+                enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
+            )
         ):
             if kind == "chunk":
                 yield ("chunk", content)
@@ -184,18 +199,25 @@ class AgentClient:
                         related_topics=[], common_mistakes=[], tokens_used=0,
                     ))
 
-    async def deep_solve(self, question: str, stage: str, kp_id: str | None = None) -> SolveResult:
+    async def deep_solve(self, question: str, stage: str, kp_id: str | None = None, *,
+                         kb_name: str | None = None, enable_rag: bool = False,
+                         enable_web_search: bool | None = None) -> SolveResult:
         """Deep solve via DeepTutor chat WS (solve mode).
 
         Prompts the engine to append a structured JSON block, then parses it into the
         three-layer SolveResult. If the engine returns only prose, we degrade gracefully
-        to answer-only (steps empty).
+        to answer-only (steps empty). When kb_name+enable_rag are set the answer is
+        grounded in that knowledge base.
         """
         message = (
             f"请解答这道数学题（学段：{stage}），给出最终答案与关键步骤。\n"
             f"{_SOLVE_SCHEMA_HINT}\n\n题目：\n{question}"
         )
-        data = await self._guarded(deeptutor_ws.chat(message, mode="solve", timeout=90.0))
+        data = await self._guarded(deeptutor_ws.chat(
+            message, mode="solve", timeout=90.0,
+            kb_name=kb_name, enable_rag=enable_rag,
+            enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
+        ))
         raw = data["answer"]
         parsed = _extract_json(raw)
         if parsed:
@@ -213,10 +235,16 @@ class AgentClient:
             related_topics=[], common_mistakes=[], tokens_used=0,
         )
 
-    async def quick_solve(self, question: str, stage: str) -> str:
+    async def quick_solve(self, question: str, stage: str, *,
+                          kb_name: str | None = None, enable_rag: bool = False,
+                          enable_web_search: bool | None = None) -> str:
         """Quick answer via DeepTutor chat WS (chat mode)."""
         message = f"请简要解答这道数学题（学段：{stage}），给出答案和要点：\n{question}"
-        data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=30.0))
+        data = await self._guarded(deeptutor_ws.chat(
+            message, mode="chat", timeout=30.0,
+            kb_name=kb_name, enable_rag=enable_rag,
+            enable_web_search=settings.deeptutor_enable_web_search or bool(enable_web_search),
+        ))
         return data["answer"]
 
     async def chat_with_template(self, message: str, template_path: str, stage: str) -> str:
@@ -236,17 +264,24 @@ class AgentClient:
         data = await self._guarded(deeptutor_ws.chat(full_message, mode="chat", timeout=90.0))
         return data["answer"]
 
-    async def generate_quiz(self, kp_name: str, count: int = 5, stage: str = "college") -> list[dict]:
+    async def generate_quiz(self, kp_name: str, count: int = 5, stage: str = "college", *,
+                            kb_name: str | None = None, enable_rag: bool = False) -> list[dict]:
         """Generate quiz questions via DeepTutor chat WS (mode=quiz).
 
         Prompts the engine to append a structured JSON block, then parses the
         question list. Degrades to an empty list when no JSON block is present.
+        When kb_name+enable_rag are set the questions are grounded in that
+        knowledge base (RAG) — the verified chat-WS path, since the native
+        question/generate WS streams results through an engine-internal callback
+        + on-disk files (no consumable HTTP contract for a BFF).
         """
         message = (
             f"请围绕知识点「{kp_name}」（学段：{stage}）出 {count} 道练习题，覆盖选择/填空/解答题型。\n"
             f"{_QUIZ_SCHEMA_HINT}"
         )
-        data = await self._guarded(deeptutor_ws.chat(message, mode="quiz", timeout=90.0))
+        data = await self._guarded(deeptutor_ws.chat(
+            message, mode="quiz", timeout=90.0, kb_name=kb_name, enable_rag=enable_rag,
+        ))
         parsed = _extract_json(data["answer"])
         questions = parsed.get("questions") if parsed else None
         return questions if isinstance(questions, list) else []
@@ -264,6 +299,56 @@ class AgentClient:
         template = template_map.get(stage, "lecture/college.txt")
         return await self.chat_with_template(
             f"请讲解知识点：{kp_name}", template, stage
+        )
+
+    async def vision_solve(self, question: str, image_base64: str, stage: str = "college") -> str:
+        """Photo/text solve via DeepTutor's vision WS — replaces the DashScope bypass."""
+        data = await self._guarded(
+            deeptutor_ws.vision_solve(question, image_base64=image_base64, timeout=120.0)
+        )
+        return data["answer"]
+
+    async def judge(self, question: str, user_answer: str,
+                    correct_answer: str | None = None,
+                    question_type: str | None = None) -> str:
+        """AI judging via DeepTutor's question/judge WS — replaces the DeepSeek grading bypass.
+
+        Returns the prose feedback; correctness is derived by the caller (learn._parse_grade)."""
+        data = await self._guarded(
+            deeptutor_ws.judge(question, user_answer, correct_answer=correct_answer,
+                               question_type=question_type)
+        )
+        return data["feedback"]
+
+    async def explain_step(self, question_context: str, step_content: str,
+                           stage: str = "college") -> str:
+        """Explain one solve step via DeepTutor chat WS — replaces the DeepSeek bypass."""
+        message = (
+            "学生追问解题步骤，请用通俗易懂的方式解释这一步为什么这样做，控制在100字内。\n"
+            f"（学段：{stage}）题目背景：{question_context}\n学生问这一步：{step_content}"
+        )
+        data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=60.0))
+        return data["answer"]
+
+    async def similar_question(self, question: str, knowledge_point_id: str,
+                               stage: str = "college") -> str:
+        """Generate a similar practice question via DeepTutor chat WS — replaces the DeepSeek bypass."""
+        message = (
+            "根据原题和知识点，生成一道同类但数字不同的练习题，只输出题目本身，不要解答。\n"
+            f"（学段：{stage}）原题：{question}\n知识点：{knowledge_point_id}"
+        )
+        data = await self._guarded(deeptutor_ws.chat(message, mode="chat", timeout=60.0))
+        return data["answer"]
+
+    async def visualize(self, question: str, image_base64: str,
+                        session_id: str | None = None) -> dict:
+        """Image → GeoGebra visualization via DeepTutor /vision/analyze (REST).
+
+        Returns the engine payload: {final_ggb_commands, ggb_script, analysis_summary, ...}.
+        """
+        img = deeptutor_ws._as_data_uri(image_base64) if image_base64 else None
+        return await self._guarded(
+            rest.vision_analyze(question, image_base64=img, session_id=session_id)
         )
 
 

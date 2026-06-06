@@ -65,15 +65,37 @@ async def _stream(path: str, request: dict, timeout: float):
                 yield json.loads(raw)
 
 
+def _chat_req(message: str, mode: str, session_id: str | None, kb_name: str | None,
+              enable_rag: bool, enable_web_search: bool, history, language: str | None) -> dict:
+    """Build the /chat request. The engine ignores `mode` (kept for back-compat);
+    the levers that actually change behaviour are kb_name + enable_rag (RAG) and
+    enable_web_search — verified against deeptutor/api/routers/chat.py."""
+    req: dict = {"message": message, "mode": mode}
+    if session_id:
+        req["session_id"] = session_id
+    if kb_name:
+        req["kb_name"] = kb_name
+    if enable_rag:
+        req["enable_rag"] = True
+    if enable_web_search:
+        req["enable_web_search"] = True
+    if history is not None:
+        req["history"] = history
+    if language:
+        req["language"] = language
+    return req
+
+
 async def chat(message: str, mode: str = "solve", session_id: str | None = None,
-               timeout: float = 90.0) -> dict:
+               timeout: float = 90.0, *, kb_name: str | None = None,
+               enable_rag: bool = False, enable_web_search: bool = False,
+               history=None, language: str | None = None) -> dict:
     """WS /api/v1/chat — aggregate the stream into {answer, session_id, statuses}."""
     answer = ""
     statuses: list[dict] = []
     sid = session_id
-    req: dict = {"message": message, "mode": mode}
-    if session_id:
-        req["session_id"] = session_id
+    req = _chat_req(message, mode, session_id, kb_name, enable_rag,
+                    enable_web_search, history, language)
     async for ev in _stream("/api/v1/chat", req, timeout):
         t = ev.get("type")
         if t == "session":
@@ -90,10 +112,14 @@ async def chat(message: str, mode: str = "solve", session_id: str | None = None,
     return {"answer": answer, "session_id": sid, "statuses": statuses}
 
 
-async def chat_stream(message: str, mode: str = "solve", timeout: float = 90.0):
+async def chat_stream(message: str, mode: str = "solve", timeout: float = 90.0, *,
+                      kb_name: str | None = None, enable_rag: bool = False,
+                      enable_web_search: bool = False, history=None,
+                      language: str | None = None):
     """WS /api/v1/chat — yield ('chunk', delta) per stream event, then ('result', full)."""
     answer = ""
-    req = {"message": message, "mode": mode}
+    req = _chat_req(message, mode, None, kb_name, enable_rag,
+                    enable_web_search, history, language)
     async for ev in _stream("/api/v1/chat", req, timeout):
         t = ev.get("type")
         if t == "stream":
