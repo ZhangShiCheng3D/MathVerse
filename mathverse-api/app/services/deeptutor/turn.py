@@ -23,7 +23,11 @@ from app.services.deeptutor_ws import _ws_base
 
 def is_terminal(event: dict) -> bool:
     """A turn-terminal event ends the stream (success, error, or rejected)."""
-    return bool((event.get("metadata") or {}).get("turn_terminal"))
+    if (event.get("metadata") or {}).get("turn_terminal"):
+        return True
+    # Live engine (verified 2026-06-07): no turn_terminal metadata is ever set —
+    # the terminal is simply the `done`/`error` event itself.
+    return event.get("type") in ("done", "error")
 
 
 class TurnConnection:

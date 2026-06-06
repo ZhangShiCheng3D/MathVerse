@@ -144,10 +144,25 @@ async def tutor_stream(websocket: WebSocket):
                     nonlocal turn_id, collected
                     async for ev in conn.events(timeout=180.0):
                         turn_id = ev.get("turn_id") or turn_id
+                        etype = ev.get("type")
                         content = ev.get("content")
-                        if content and ev.get("type") not in ("status", "error", "ask_user"):
-                            collected = content if ev.get("type") == "result" else collected + content
-                        await websocket.send_json(ev)
+                        # Live-engine contract (verified 2026-06-07): the answer
+                        # text arrives in `content` events; `result`/`done` carry
+                        # empty content; session/stage_*/progress/thinking are
+                        # engine-internal telemetry. Translate to the app contract
+                        # (stream/result/ask_user/error) instead of forwarding raw.
+                        if etype in ("content", "stream"):
+                            if content:
+                                collected += content
+                                await websocket.send_json(
+                                    {"type": "stream", "content": content}
+                                )
+                        elif etype == "result":
+                            if content:
+                                collected = content
+                                await websocket.send_json(ev)
+                        elif etype in ("ask_user", "error"):
+                            await websocket.send_json(ev)
 
                 async def pump_app():
                     nonlocal turn_id

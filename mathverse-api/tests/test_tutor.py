@@ -103,6 +103,39 @@ def test_tutor_ask_user_roundtrip(monkeypatch):
     assert _FakeConn.last_start["session_id"].startswith("mv_anon_")
 
 
+class _LiveEngineConn(_FakeConn):
+    """Scripts the EXACT event sequence observed against the live engine
+    (2026-06-07): answer text in `content` events, empty `result`/`done`,
+    and NO turn_terminal metadata anywhere — `done` itself is the terminal."""
+
+    async def events(self, timeout=180.0):
+        yield {"type": "session", "content": "", "metadata": {"session_id": "s"}, "turn_id": "t9"}
+        yield {"type": "stage_start", "content": "", "metadata": {}, "turn_id": "t9"}
+        yield {"type": "thinking", "content": "让我想想", "metadata": {}, "turn_id": "t9"}
+        yield {"type": "content", "content": "答案是 2", "metadata": {}, "turn_id": "t9"}
+        yield {"type": "result", "content": "", "metadata": {}, "turn_id": "t9"}
+        yield {"type": "done", "content": "", "metadata": {}, "turn_id": "t9"}
+
+
+def test_tutor_live_engine_event_contract(monkeypatch):
+    """content → stream; telemetry (session/stage/thinking) not forwarded;
+    `done` without turn_terminal still terminates the turn."""
+    monkeypatch.setattr("app.routes.tutor.TurnConnection", _LiveEngineConn)
+    with client.websocket_connect("/ws/tutor") as ws:
+        ws.send_json({"message": "1+1=?"})
+        first = ws.receive_json()
+        assert first == {"type": "stream", "content": "答案是 2"}
+        done = ws.receive_json()
+        assert done["type"] == "done"
+    # The terminal detector must accept the live engine's bare done/error
+    # events (no turn_terminal metadata) and the documented metadata form.
+    from app.services.deeptutor.turn import is_terminal
+    assert is_terminal({"type": "done", "metadata": {}})
+    assert is_terminal({"type": "error"})
+    assert is_terminal({"type": "result", "metadata": {"turn_terminal": True}})
+    assert not is_terminal({"type": "content", "metadata": {}})
+
+
 def test_tutor_regenerate_reruns_session(monkeypatch):
     monkeypatch.setattr("app.routes.tutor.TurnConnection", _FakeConn)
     _FakeConn.last_regen = None
