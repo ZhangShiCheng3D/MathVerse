@@ -69,7 +69,7 @@ assert OLD_EXEC in s, "start-backend.sh uvicorn exec line not found — upstream
 open(launcher_f, "w", encoding="utf-8").write(s.replace(OLD_EXEC, NEW_EXEC))
 
 # 4) [P1 high-concurrency] Drop in new module files that don't exist upstream.
-#    The overlay tree mirrors the image layout (overlay/<path> -> /<path>), so it
+#    The overlay tree mirrors the app layout (overlay/<path> -> /app/<path>), so it
 #    only ADDS files (e.g. the PostgresSessionStore) — it never silently clobbers
 #    an upstream file. We assert each target does NOT already exist so that if
 #    upstream ships a same-named module we notice and reconcile instead of
@@ -84,7 +84,15 @@ if _os.path.isdir(OVERLAY_DIR):
         for name in files:
             src_path = _os.path.join(root, name)
             rel = _os.path.relpath(src_path, OVERLAY_DIR)
-            dst_path = _os.path.join("/", rel)
+            # The app tree lives under /app (see ROOT). A wrong join root here
+            # ships modules outside sys.path -> ImportError at runtime, which
+            # static checks can't catch — so also assert the top-level package
+            # we're adding into already exists upstream.
+            dst_path = _os.path.join("/app", rel)
+            top_pkg = _os.path.join("/app", rel.split(_os.sep)[0])
+            assert _os.path.isdir(top_pkg), (
+                f"overlay top-level package missing upstream: {top_pkg} — wrong copy root?"
+            )
             assert not _os.path.exists(dst_path), (
                 f"overlay target already exists upstream: {dst_path} — reconcile, don't clobber"
             )
