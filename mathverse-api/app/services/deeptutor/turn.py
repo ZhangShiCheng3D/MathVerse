@@ -67,7 +67,10 @@ class TurnConnection:
                          extra: dict | None = None) -> None:
         payload: dict = {
             "type": "start_turn",
-            "message": message,
+            # The engine reads the user text from `content` (turn_runtime
+            # `payload.get("content")`), NOT `message` — verified live
+            # 2026-06-07 (a `message` key silently yields an empty question).
+            "content": message,
             "capability": capability,
             "language": language,
         }

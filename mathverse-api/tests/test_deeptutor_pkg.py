@@ -112,7 +112,9 @@ async def test_turn_streams_until_terminal(monkeypatch):
         req = json.loads(await ws.recv())
         assert req["type"] == "start_turn"
         assert req["capability"] == "research"
-        assert req["message"] == "证明素数无穷"
+        # Engine contract: the user text rides in `content` (verified live).
+        assert req["content"] == "证明素数无穷"
+        assert "message" not in req
         for ev in [
             {"type": "status", "content": "thinking", "metadata": {}},
             {"type": "pong"},  # heartbeat — must be filtered
