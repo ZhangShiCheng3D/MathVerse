@@ -40,8 +40,12 @@ class TurnConnection:
 
     async def __aenter__(self) -> "TurnConnection":
         uri = f"{_ws_base()}/api/v1/ws"
+        # ping_interval=None: the engine's event loop blocks ~1 min while a turn
+        # spins up its agent stack (verified live 2026-06-07), so default client
+        # keepalive (20s ping timeout) kills a healthy connection. Liveness is
+        # bounded by the caller's per-event read timeout in events() instead.
         self._ws = await websockets.connect(
-            uri, open_timeout=self._open_timeout, max_size=None
+            uri, open_timeout=self._open_timeout, max_size=None, ping_interval=None
         )
         return self
 
