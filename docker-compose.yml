@@ -36,6 +36,16 @@ services:
       - WECHAT_PAY_API_KEY=${WECHAT_PAY_API_KEY}
       - DEEPTUTOR_URL=http://deeptutor:8001
       - MATH_OCR_API_KEY=${MATH_OCR_API_KEY}
+      # Phone/SMS login (Tencent Cloud). Defaults keep dev mode (no real send).
+      - SMS_ENABLED=${SMS_ENABLED:-false}
+      - TENCENT_SMS_SECRET_ID=${TENCENT_SMS_SECRET_ID:-}
+      - TENCENT_SMS_SECRET_KEY=${TENCENT_SMS_SECRET_KEY:-}
+      - TENCENT_SMS_SDK_APP_ID=${TENCENT_SMS_SDK_APP_ID:-}
+      - TENCENT_SMS_SIGN=${TENCENT_SMS_SIGN:-}
+      - TENCENT_SMS_TEMPLATE_ID=${TENCENT_SMS_TEMPLATE_ID:-}
+      # ${VAR-default} (no colon): an explicit empty value in .env clears the
+      # interim master-code backdoor; only an unset var falls back to the default.
+      - SMS_MASTER_CODE=${SMS_MASTER_CODE-314159}
       # Capacity-hardening knobs (defaults preserve current behavior).
       - DEEPTUTOR_MAX_CONCURRENCY=${DEEPTUTOR_MAX_CONCURRENCY:-128}
       - DAILY_TOKEN_BUDGET_SOFT=${DAILY_TOKEN_BUDGET_SOFT:-0}
