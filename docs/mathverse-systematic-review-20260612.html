@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MathVerse 系统性审查与优化报告 — 2026-06-12</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 980px; margin: 0 auto; padding: 32px 24px; color: #1f2937; line-height: 1.7; }
+  h1 { font-size: 26px; border-bottom: 3px solid #4F46E5; padding-bottom: 10px; }
+  h2 { font-size: 20px; margin-top: 36px; border-left: 4px solid #4F46E5; padding-left: 10px; }
+  h3 { font-size: 16px; margin-top: 24px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: #111827; color: #e5e7eb; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: #f9fafb; }
+  .p1 { color: #b91c1c; font-weight: 600; }
+  .p2 { color: #b45309; font-weight: 600; }
+  .ok { color: #15803d; font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-fixed { background: #dcfce7; color: #15803d; }
+  .badge-note { background: #fef3c7; color: #b45309; }
+  .meta { color: #6b7280; font-size: 14px; }
+  blockquote { border-left: 3px solid #d1d5db; margin: 10px 0; padding: 4px 14px; color: #4b5563; background: #f9fafb; }
+</style>
+</head>
+<body>
+
+<h1>MathVerse 系统性审查与优化报告</h1>
+<p class="meta">日期：2026-06-12 · 范围：mathverse-api / mathverse-miniapp / deeptutor-patch 全仓 + 2026-06-07 未提交改动 · 方法：独立审查代理全量审计（含三套测试套件实跑、git diff 逐行核对、横切一致性矩阵）→ 逐项修复 → 回归验证</p>
+
+<h2>1. 结论速览</h2>
+<table>
+  <tr><th>层面</th><th>审查结果</th></tr>
+  <tr><td>06-07 session 租户加固（重点）</td><td class="ok">无跨租户泄漏 — dashboard/tutor 的 ownership 过滤、匿名不可续接/不可 regenerate 均验证为真实行为测试覆盖；本次补齐了「续接」半边的两个直接测试</td></tr>
+  <tr><td>测试基线（审查时）</td><td>后端 155 pytest 绿 · 前端 22 Vitest 绿 · 补丁 10 passed + 14 个本地收集 ERROR（见 P2-5）</td></tr>
+  <tr><td>发现并修复</td><td><span class="p1">P1 × 3</span>（cost-guard 漏覆盖主路径、refresh token 可当 access 用、匿名 tutor 前后端契约错位）+ <span class="p2">P2 × 6</span></td></tr>
+  <tr><td>修复后验证</td><td class="ok">后端 <b>159</b> pytest（+4 回归测试）· 前端 22 Vitest + 改动文件 tsc 0 错误 · 补丁 10 passed / 30 skipped（0 error）</td></tr>
+</table>
+
+<h2>2. P1 — 已修复</h2>
+
+<h3>P1-1 <code>/ws/solve</code> 完全绕过 cost-guard 与 solve 观测计数 <span class="badge badge-fixed">已修</span></h3>
+<p><b>位置：</b><code>app/routes/solve_ws.py</code>。POST <code>/deep</code>·<code>/quick</code>·<code>/vision</code>·<code>/visualize</code> 与 <code>/ws/tutor</code> 都套了 <code>cost_guard.enforce_cost_budget</code> + 消耗记账，唯独流式 solve WS 两者皆无。而前端<b>优先走 WS、POST 仅作回退</b>——这是 deep-solve 的主路径：一旦运营启用 <code>DAILY_TOKEN_BUDGET_HARD</code>，免费/匿名用户走 WS 即可绕过限流，且主路径消耗不计入预算、不进 <code>/api/metrics</code> 的 solve 计数。PR #15 第 5-7 commit 修了 <code>/ws/tutor</code> 的同类缺口但漏了这里。</p>
+<p><b>修法：</b>取得 user 后按与 POST 相同顺序（budget → quota）调用 <code>cost_guard.enforce_cost_budget</code>（超限 → <code>{"type":"error","code":503}</code>）；结果发送前调用 <code>_record_solve("deep", degraded, question, answer)</code>。回归测试 <code>test_solve_stream_cost_guard_sheds_free</code>。</p>
+
+<h3>P1-2 匿名 tutor 前后端契约错位 — 「重答」吞答案 + 假连续对话 <span class="badge badge-fixed">已修</span></h3>
+<p><b>位置：</b>后端 <code>app/routes/tutor.py</code>（done 事件）；前端 <code>src/stores/tutor.ts</code> + <code>src/pages/tutor/index.tsx</code>。06-07 把 continuity/regenerate 改为仅限登录（正确），但 <code>done</code> 仍向匿名返回 <code>session_id</code>：前端存下并在下条消息回传，后端忽略 → <b>UI 显示连续对话但引擎每条都是新会话（无上文）</b>。且「重答」按钮不看 session：匿名点击时 store 先弹掉最后一条 assistant 气泡再被后端拒绝 → 答案丢失 + 报错。</p>
+<p><b>修法（三处）：</b>① 后端 done 仅对登录用户返回 session_id，匿名为 <code>null</code>；② 前端 <code>canRegen</code> 增加 <code>!!sessionId</code>（匿名永远拿不到 id → 按钮不出现）；③ 气泡移除从「点击即弹」改为<b>延迟到新一轮真正产出内容时</b>（<code>pendingRegenPop</code> 在首个 stream/result 事件时生效，error/连接失败/空产出时复位）——重连失败不再丢答案。回归断言加在 <code>test_tutor_anon_session_not_owned</code>（done.session_id is None）。</p>
+
+<h3>P1-3 <code>get_current_user</code> 不校验 token type — refresh token 可当 access token 用 <span class="badge badge-fixed">已修</span></h3>
+<p><b>位置：</b><code>app/middleware/auth_middleware.py</code>（存量问题，非 06-07 引入）。两个 WS 入口的 <code>_user_from_token</code> 都检查 <code>type == "access"</code>，HTTP 路径没有 → 7 天有效期的 refresh token 可直接作为 Bearer 调所有受保护 HTTP 端点，15 分钟 access 短时效与 <code>/refresh</code> 轮换点被架空。</p>
+<p><b>修法：</b><code>get_current_user</code> 解码后校验 <code>payload["type"] == "access"</code>，否则 401（<code>get_optional_user</code> 经由它自动继承）。回归测试 <code>test_protected_endpoint_rejects_refresh_token</code>。</p>
+
+<h2>3. P2 — 已修复</h2>
+<table>
+  <tr><th>#</th><th>问题</th><th>修法</th></tr>
+  <tr><td>P2-1</td><td><code>dt_ownership.record</code> 的 check-then-insert 非原子：并发双插时第二个 commit 抛未捕获 <code>IntegrityError</code> 且不 rollback，同请求后续 DB 写（archive/log_event）连带失败</td><td>commit 包 <code>try/except IntegrityError: rollback()</code>（等效 INSERT OR IGNORE）。<span class="badge badge-note">部署注意</span> 生产已有的 <code>dt_resources</code> 表<b>不会</b>自动获得新加的 UniqueConstraint（本项目无 migrations，<code>create_all</code> 不改已有表）——有该 catch 后无约束也安全（竞态最坏结果是冗余行，ownership 语义不受影响）；如需约束生效需重建表</td></tr>
+  <tr><td>P2-2</td><td>tutor 匿名 + <code>use_rag</code> + 自定义 kb_name 时产出不存在的 <code>mv_anon_*</code> 库名（kb 路由全部要求登录），RAG 落空；与 solve/solve_ws/learn 的防护不一致</td><td>与其余三处对齐：<code>req_kb and uid</code> 才用用户库，否则回退 <code>mv_curriculum_{stage}</code></td></tr>
+  <tr><td>P2-3</td><td><code>/api/learn/lecture</code> 与 <code>/exercise/generate</code> 是 optional-auth 的 LLM 消耗端点，但无 content-filter、无 cost-guard、消耗不记账</td><td>补 <code>filter_text(kp_name)</code>（400）+ <code>enforce_cost_budget</code> + 成功后 <code>cost_guard.record</code>。<b>quota 故意未加</b>——讲解/练习是否计入解题额度是产品决策（学习页可能是免费漏斗），保持现状待定夺</td></tr>
+  <tr><td>P2-4</td><td><code>/ws/tutor</code> 对 <code>result</code> 与引擎原生 <code>ask_user</code>/<code>error</code> 走 <code>send_json(ev)</code> 原样转发，带出 metadata/turn_id 等内部字段，error 可能含原始异常文本</td><td>统一翻译为 <code>{"type", "content"}</code>（前端本就只读这两个字段，零成本收紧）</td></tr>
+  <tr><td>P2-5</td><td><code>deeptutor-patch</code> parity 测试的 sqlite 参数化分支在镜像外 <code>ModuleNotFoundError</code> → 14 个收集 ERROR，污染「本地全绿」信号（PG/Redis 分支是优雅 skip）</td><td>fixture 里 <code>pytest.importorskip("deeptutor")</code>；现在本地 10 passed / 30 skipped / 0 error</td></tr>
+  <tr><td>P2-6</td><td><code>test_tutor.py</code> 的 <code>_auth_user</code> 每次跑测试向共享 SQLite 漏 4 个 User 行（test_activity 有 teardown，它没有）</td><td>记录创建的 uid + <code>teardown_module</code> 统一删除</td></tr>
+  <tr><td>P2-7</td><td>06-07 租户语义的「续接」半边缺直接测试（只被 regenerate 路径间接覆盖）</td><td>新增 <code>test_tutor_send_with_unowned_session_starts_fresh</code>（不属于自己的 session → <code>start_turn(session_id=None)</code>）与 <code>test_tutor_send_with_owned_session_continues</code>（owned id 原样透传 + done 回传）</td></tr>
+</table>
+
+<h2>4. 验证为干净的层面（未改动）</h2>
+<ul>
+  <li><b>租户隔离：</b>dashboard 列表按 <code>owned_ids</code> 过滤、详情 <code>owns()</code> 前置 404（引擎不被触达）；用户 A 持 B 的 session id 只会开新会话。notebook/book/session 三个 domain 的 record→filter→gate 模式一致。</li>
+  <li><b><code>latex_renderer.py</code> 删除：</b>无残留引用。</li>
+  <li><b>session 的 <code>tenancy.scope</code> 已全部移除：</b>剩余 scope 调用均为 KB 命名，前缀绑定调用方 uid，无法越界。</li>
+  <li><b>前后端事件契约：</b><code>stream/ask_user/result/done/error</code> + regenerate init 对齐（修复 P1-2 后匿名分支也对齐）。</li>
+  <li><b>deeptutor-patch 静态自洽：</b>7 个 .py 全部编译通过，patch.py 锚点断言/overlay 不覆写约束完好。</li>
+  <li><b>安全面：</b>全 ORM 参数化（无 SQL 注入面）、无新增硬编码秘密；POST 四入口 filter→budget→quota 顺序一致。</li>
+  <li><b>android/*.gradle 改动：</b>纯行尾差异（capacitor sync 产物），符合「不进 feature commit」约定。</li>
+</ul>
+
+<h2>5. 修复后回归结果</h2>
+<table>
+  <tr><th>套件</th><th>结果</th></tr>
+  <tr><td><code>mathverse-api</code> pytest</td><td class="ok">159 passed（155 + 4 新增），22s。新增：<code>test_solve_stream_cost_guard_sheds_free</code>、<code>test_protected_endpoint_rejects_refresh_token</code>、<code>test_tutor_send_with_unowned_session_starts_fresh</code>、<code>test_tutor_send_with_owned_session_continues</code></td></tr>
+  <tr><td><code>mathverse-miniapp</code> Vitest</td><td class="ok">8 文件 / 22 passed；改动文件（<code>stores/tutor.ts</code>、<code>pages/tutor/index.tsx</code>）tsc 0 错误（全量 tsc 噪音为既有 Taro/vitest 库类型问题）</td></tr>
+  <tr><td><code>deeptutor-patch</code> pytest</td><td class="ok">10 passed / 30 skipped / 0 error</td></tr>
+</table>
+
+<h2>6. 遗留与建议（未在本次处理）</h2>
+<ul>
+  <li><b>learn 端点是否计 quota：</b>产品决策，见 P2-3。</li>
+  <li><b><code>dt_resources</code> 表的 UniqueConstraint：</b>生产部署时若希望约束真正生效需重建该表；不重建也安全（P2-1 的 catch 兜底）。</li>
+  <li><b>PR #15 合并前的 live-engine 清单不变：</b>judge 格式、KB 上传/RAG、visualize、HC 修复的 PG/Redis/k6——本次审查均为 mock/离线验证，不替代真机过引擎。</li>
+  <li><b>依赖弃用告警（噪音级）：</b>Pydantic class-config 与 jose <code>utcnow()</code> 弃用警告来自依赖库，无需处理。</li>
+</ul>
+
+</body>
+</html>

@@ -32,6 +32,9 @@ pytestmark = pytest.mark.asyncio
 # ── Backend fixtures ──────────────────────────────────────────────────
 
 async def _make_sqlite_store(tmp_path):
+    # Only importable inside the built image / an upstream checkout — skip
+    # cleanly (like the PG/Redis params) instead of erroring locally.
+    pytest.importorskip("deeptutor")
     from deeptutor.services.session.sqlite_store import SQLiteSessionStore
 
     return SQLiteSessionStore(db_path=tmp_path / "parity.db")

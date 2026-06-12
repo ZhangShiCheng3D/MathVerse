@@ -142,4 +142,7 @@ class DtResource(Base):
     dt_id = Column(String, nullable=False)     # DeepTutor's resource id
     title = Column(String, default="")
     created_at = Column(DateTime, default=_now)
-    __table_args__ = (Index("idx_dt_res_owner", "user_id", "domain"),)
+    __table_args__ = (
+        Index("idx_dt_res_owner", "user_id", "domain"),
+        UniqueConstraint("user_id", "domain", "dt_id", name="uq_dt_res_owner_id"),
+    )

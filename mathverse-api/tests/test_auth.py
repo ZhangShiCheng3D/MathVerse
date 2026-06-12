@@ -59,6 +59,16 @@ def test_refresh_endpoint_rejects_access_token(client):
     assert resp.status_code == 401
 
 
+def test_protected_endpoint_rejects_refresh_token(client):
+    """The mirror of the above: a 7-day refresh token must NOT work as a Bearer
+    access token — else the 15-min access expiry is meaningless."""
+    from app.middleware.auth_middleware import create_refresh_token
+    refresh = create_refresh_token("u123")
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {refresh}"})
+    assert resp.status_code == 401
+    assert "token type" in resp.json()["detail"].lower()
+
+
 def test_mp_login_requires_config(client, monkeypatch):
     """mp-login must 500 (not 404) when WeChat creds are unset."""
     from app.config import settings

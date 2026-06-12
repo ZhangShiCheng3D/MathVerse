@@ -43,6 +43,10 @@ async def get_current_user(
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
     payload = decode_token(credentials.credentials)
+    # Only short-lived access tokens may authenticate requests — a leaked 7-day
+    # refresh token must still go through /api/auth/refresh (the rotation point).
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid token payload")

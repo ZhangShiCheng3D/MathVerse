@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.middleware.auth_middleware import get_optional_user, get_current_user
+from app.middleware.content_filter import filter_text
 from app.models.all import User, LearningProgress
+from app.services import cost_guard
 from app.services.agent_client import agent_client, AgentUnavailableError
 from app.services.deeptutor import tenancy
 from app.services.kg import load_kg
@@ -53,10 +55,17 @@ class LectureRequest(BaseModel):
 @router.post("/lecture")
 async def generate_lecture(req: LectureRequest, user: User | None = Depends(get_optional_user)):
     """Generate AI lecture for a knowledge point."""
+    # Same input filter + spend guardrail as the solve entrypoints — this is an
+    # optional-auth LLM consumer too.
+    is_safe, _ = filter_text(req.kp_name)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail="输入内容包含敏感信息，无法处理")
+    cost_guard.enforce_cost_budget(user)
     try:
         lecture = await agent_client.generate_lecture(req.kp_name, req.stage)
     except AgentUnavailableError as e:
         raise HTTPException(status_code=503, detail=f"AI讲课服务暂时不可用: {e}")
+    cost_guard.record(req.kp_name, lecture)
     return {"kp_id": req.kp_id, "lecture": lecture}
 
 
@@ -74,6 +83,10 @@ class ExerciseRequest(BaseModel):
 @router.post("/exercise/generate")
 async def generate_exercise(req: ExerciseRequest, user: User | None = Depends(get_optional_user)):
     """Generate practice exercises for a knowledge point."""
+    is_safe, _ = filter_text(req.kp_name)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail="输入内容包含敏感信息，无法处理")
+    cost_guard.enforce_cost_budget(user)
     if req.use_rag and req.kb_name and user:
         kb_name, enable_rag = tenancy.scope(user.id, req.kb_name), True
     elif req.use_rag:
@@ -86,6 +99,7 @@ async def generate_exercise(req: ExerciseRequest, user: User | None = Depends(ge
         )
     except AgentUnavailableError as e:
         raise HTTPException(status_code=503, detail=f"出题服务暂时不可用: {e}")
+    cost_guard.record(req.kp_name, json.dumps(questions, ensure_ascii=False))
     return {"kp_id": req.kp_id, "questions": questions}
 
 

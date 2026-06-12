@@ -2,10 +2,10 @@
 activity feed), scoped to the caller's own turn-runtime sessions.
 
 The tutor page's conversation is in-memory and lost on navigate-away; this lets a
-user list and re-open their past AI-tutor sessions. DeepTutor's session store is
-single-tenant, so we filter the feed to sessions whose id carries this user's
-`mv_{uid}_` prefix (set when /ws/tutor scopes the session id) and gate detail reads
-by the same prefix.
+user list and re-open their past AI-tutor sessions. DeepTutor assigns session ids
+itself (client-named ids are ignored — verified live 2026-06-07), so tenancy works
+through the DtResource ownership table (domain "session", recorded by /ws/tutor
+when a turn's engine-assigned id first appears), not an id-prefix convention.
 
 Limitation: DeepTutor can only return the most recent N sessions globally, so under
 heavy multi-user load a user's older sessions may fall outside the window — acceptable
@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.middleware.auth_middleware import get_current_user
 from app.models.all import User
-from app.services.deeptutor import rest, tenancy
+from app.services import dt_ownership
+from app.services.deeptutor import rest
 from app.services.deeptutor.transport import RestError
 from app.database import get_db
 
@@ -29,17 +30,16 @@ async def recent(user: User = Depends(get_current_user), db: Session = Depends(g
         data = await rest.dashboard_recent(limit=100)
     except RestError as e:
         raise HTTPException(status_code=503, detail=f"历史记录服务暂时不可用: {e}")
-    prefix = tenancy.scope(user.id, "")
-    activities = [
-        a for a in (data or []) if str(a.get("id") or "").startswith(prefix)
-    ]
+    owned = dt_ownership.owned_ids(db, user.id, "session")
+    activities = [a for a in (data or []) if str(a.get("id") or "") in owned]
     return {"activities": activities}
 
 
 @router.get("/{entry_id}")
-async def entry(entry_id: str, user: User = Depends(get_current_user)):
-    # Ownership gate: a user can only open sessions under their own prefix.
-    if not entry_id.startswith(tenancy.scope(user.id, "")):
+async def entry(entry_id: str, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    # Ownership gate: a user can only open their own sessions.
+    if not dt_ownership.owns(db, user.id, "session", entry_id):
         raise HTTPException(status_code=404, detail="未找到该记录")
     try:
         return await rest.dashboard_entry(entry_id)

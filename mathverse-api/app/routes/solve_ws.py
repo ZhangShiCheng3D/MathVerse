@@ -19,7 +19,8 @@ from app.services.agent_client import agent_client, AgentUnavailableError
 from app.services.deeptutor import tenancy
 from app.services.quota import enforce_solve_quota, touch_activity
 from app.services.analytics import log_event
-from app.routes.solve import _fallback_solve, _archive_solve
+from app.services import cost_guard
+from app.routes.solve import _fallback_solve, _archive_solve, _record_solve
 from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,13 @@ async def solve_stream(websocket: WebSocket):
             return
 
         user = _user_from_token(db, init.get("token"))
+        # Same guards as POST /deep (this WS is the frontend's PRIMARY solve
+        # path, POST is the fallback): spend budget, then quota.
+        try:
+            cost_guard.enforce_cost_budget(user)
+        except HTTPException as e:
+            await websocket.send_json({"type": "error", "message": e.detail, "code": 503})
+            return
         if user:
             try:
                 enforce_solve_quota(user, db)
@@ -105,6 +113,7 @@ async def solve_stream(websocket: WebSocket):
                            {"answer": payload["answer"], "steps": payload["steps"]}, kp_id)
         log_event(db, "solve", user.id if user else None,
                   {"type": "deep_stream", "degraded": degraded})
+        _record_solve("deep", degraded, question, payload["answer"])
 
         await websocket.send_json({"type": "result", "degraded": degraded, **payload})
     except WebSocketDisconnect:

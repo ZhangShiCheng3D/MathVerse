@@ -45,6 +45,19 @@ interface TutorStore {
 // can reach it without it leaking into render or serialization.
 let activeTask: any = null;
 
+// Regenerate drops the trailing assistant bubble only once the fresh run actually
+// produces output — so a failed connection doesn't lose the previous answer.
+let pendingRegenPop = false;
+
+const popStaleAssistant = (messages: TutorMessage[]): TutorMessage[] => {
+  if (!pendingRegenPop) return messages;
+  pendingRegenPop = false;
+  if (messages.length && messages[messages.length - 1].role === 'assistant') {
+    return messages.slice(0, -1);
+  }
+  return messages;
+};
+
 // Open a /ws/tutor socket and run one turn from `initPayload` (a normal start
 // or a {type:'regenerate'} re-run). Shared by send() and regenerate().
 const openTurnSocket = (set: any, get: any, initPayload: Record<string, any>) => {
@@ -77,19 +90,24 @@ const openTurnSocket = (set: any, get: any, initPayload: Record<string, any>) =>
       try { ev = JSON.parse(res.data); } catch { return; }
       switch (ev.type) {
         case 'stream':
-          set((s: any) => ({ streaming: s.streaming + (ev.content || '') }));
+          set((s: any) => ({
+            messages: popStaleAssistant(s.messages),
+            streaming: s.streaming + (ev.content || ''),
+          }));
           break;
         case 'ask_user':
           set({ ask: { pending: true, question: ev.content || '请补充信息' } });
           break;
         case 'result':
           set((s: any) => ({
-            messages: [...s.messages, { role: 'assistant', content: ev.content || s.streaming }],
+            messages: [...popStaleAssistant(s.messages), { role: 'assistant', content: ev.content || s.streaming }],
             streaming: '',
             ask: { pending: false, question: '' },
           }));
           break;
         case 'done':
+          // A regen that produced no output keeps the previous answer in place.
+          pendingRegenPop = false;
           set((s: any) => ({
             isRunning: false,
             sessionId: ev.session_id || startSid,
@@ -100,6 +118,7 @@ const openTurnSocket = (set: any, get: any, initPayload: Record<string, any>) =>
           activeTask = null;
           break;
         case 'error':
+          pendingRegenPop = false;
           set({ isRunning: false, error: ev.content || '出错了', ask: { pending: false, question: '' } });
           try { task.close(); } catch { /* already closed */ }
           activeTask = null;
@@ -109,7 +128,7 @@ const openTurnSocket = (set: any, get: any, initPayload: Record<string, any>) =>
       }
     });
 
-    task.onError(() => { set({ isRunning: false, error: '连接错误' }); activeTask = null; });
+    task.onError(() => { pendingRegenPop = false; set({ isRunning: false, error: '连接错误' }); activeTask = null; });
     task.onClose(() => { if (get().isRunning) set({ isRunning: false }); });
   })();
 };
@@ -150,12 +169,10 @@ export const useTutorStore = create<TutorStore>((set, get) => ({
   regenerate: (stage) => {
     const { sessionId, isRunning } = get();
     if (!sessionId || isRunning) return;
-    // Drop the trailing assistant bubble — the engine replaces it with a fresh run.
-    set((s) => {
-      const m = [...s.messages];
-      if (m.length && m[m.length - 1].role === 'assistant') m.pop();
-      return { messages: m, streaming: '', isRunning: true, error: '' };
-    });
+    // The trailing assistant bubble is dropped lazily (popStaleAssistant) when
+    // the fresh run starts producing output.
+    pendingRegenPop = true;
+    set({ streaming: '', isRunning: true, error: '' });
     openTurnSocket(set, get, { type: 'regenerate', session_id: sessionId, stage });
   },
 
@@ -168,6 +185,7 @@ export const useTutorStore = create<TutorStore>((set, get) => ({
   reset: () => {
     try { activeTask?.close(); } catch { /* already closed */ }
     activeTask = null;
+    pendingRegenPop = false;
     set({ messages: [], streaming: '', isRunning: false, ask: { pending: false, question: '' }, sessionId: null, error: '' });
   },
 }));

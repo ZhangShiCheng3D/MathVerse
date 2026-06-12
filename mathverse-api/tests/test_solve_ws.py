@@ -42,3 +42,21 @@ def test_solve_stream_rejects_empty_question():
         ws.send_json({"question": "  ", "stage": "junior"})
         m = ws.receive_json()
         assert m["type"] == "error"
+
+
+def test_solve_stream_cost_guard_sheds_free(monkeypatch):
+    """The WS is the frontend's PRIMARY solve path — it must enforce the same
+    hard daily spend budget as POST /deep (free/anon shed with 503)."""
+    from app.config import settings
+    from app.services import cost_guard
+    cost_guard.reset()
+    monkeypatch.setattr(settings, "daily_token_budget_hard", 5)
+    cost_guard.record("x" * 30)  # 20 tokens >= 5 -> over hard
+    try:
+        with client.websocket_connect("/ws/solve") as ws:
+            ws.send_json({"question": "1+1", "stage": "junior"})
+            m = ws.receive_json()
+            assert m["type"] == "error"
+            assert m.get("code") == 503
+    finally:
+        cost_guard.reset()

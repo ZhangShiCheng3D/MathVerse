@@ -5,7 +5,7 @@ import { useTutorStore } from '../../stores/tutor';
 import { useUserStore } from '../../stores/user';
 
 export default function TutorPage() {
-  const { capability, capabilities, messages, streaming, isRunning, ask, error, setCapability, send, regenerate, reply, fetchCapabilities } = useTutorStore();
+  const { capability, capabilities, messages, streaming, isRunning, ask, error, sessionId, setCapability, send, regenerate, reply, fetchCapabilities } = useTutorStore();
   useEffect(() => { fetchCapabilities(); }, []);
   const user = useUserStore((s) => s.user);
   const stage = user?.current_stage || 'college';
@@ -23,7 +23,9 @@ export default function TutorPage() {
     setReplyText('');
   };
 
-  const canRegen = !isRunning && messages.some((m) => m.role === 'assistant');
+  // Regenerate needs an owned session — the server only hands session_id back
+  // to authenticated callers, so anon users never see the button.
+  const canRegen = !isRunning && !!sessionId && messages.some((m) => m.role === 'assistant');
 
   return (
     <View style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#f3f4f6' }}>

@@ -1,15 +1,25 @@
 """智能体导师 — bidirectional WS proxy over DeepTutor's unified_ws turn runtime.
 
 This is the agentic core MathVerse never used before. The app opens one socket;
-this proxy opens a TurnConnection to DeepTutor, starts a turn (tenancy-scoped
-session), streams the turn's events back to the app, and forwards the app's
-control messages (reply / cancel) to the engine — so the `ask_user` interactive
-loop works. Quota + content-filter + archive are applied at this boundary.
+this proxy opens a TurnConnection to DeepTutor, starts a turn, streams the
+turn's events back to the app, and forwards the app's control messages
+(reply / cancel) to the engine — so the `ask_user` interactive loop works.
+Quota + content-filter + archive are applied at this boundary.
+
+Session continuity (verified against the live engine 2026-06-07): DeepTutor's
+ensure_session() CREATES A NEW session for any unknown id, so client-named /
+prefix-scoped ids never get continuity. Sessions are therefore treated like the
+other server-ID'd domains (C2 DtResource ownership): pass through an engine id
+the caller owns, else let the engine assign one, record ownership from the
+turn's first event, and hand the ENGINE id back to the app in `done`. Continuity
+and regenerate are auth-only — anon callers have no stable owner key, so their
+sessions stay ephemeral (no shared pool one anon could reuse from another).
 
 App → BFF first message:
   {token?, capability?, message, session_id?, use_rag?, kb_name?}
 App → BFF control (any time): {type:"reply", text} | {type:"cancel"}
-BFF → App: each raw turn event {type, content, ...}, then {type:"done", session_id}.
+BFF → App: translated events {type: stream|result|ask_user|error, content},
+then {type:"done", session_id}.
 
 NOTE (deployment, see CLAUDE.md C3): the turn runtime is DeepTutor "face A".
 Never raise WEB_CONCURRENCY>1 / add replicas without DEEPTUTOR_PG_DSN, or turns
@@ -17,13 +27,13 @@ get killed as cross-worker orphans.
 """
 import asyncio
 import logging
-import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from app.middleware.auth_middleware import decode_token
 from app.middleware.content_filter import filter_text
 from app.models.all import User
+from app.services import dt_ownership
 from app.services.agent_client import AgentUnavailableError
 from app.services.deeptutor import tenancy
 from app.services.deeptutor.turn import TurnConnection
@@ -53,6 +63,9 @@ TUTOR_CAPABILITIES = [
     {"id": "visualize", "label": "可视化", "description": "几何/函数图形可视化"},
 ]
 _CAPABILITIES = {c["id"] for c in TUTOR_CAPABILITIES}
+
+# Live engine ask_user marker (tool_result content prefix) — see pump_engine.
+_ASK_PREFIX = "[awaiting user reply to:"
 
 
 @router.get("/capabilities")
@@ -117,18 +130,32 @@ async def tutor_stream(websocket: WebSocket):
             return
 
         uid = user.id if user else None
-        # Tenancy-scoped session so DeepTutor's shared session store stays isolated.
-        raw_session = init.get("session_id") or uuid.uuid4().hex[:16]
-        session_id = tenancy.scope(uid, raw_session)
+        # Engine-assigned session ids + DtResource ownership (see module doc).
+        # Continuity and regenerate need a stable identity, so they're auth-only:
+        # an anonymous caller has no owner key, always gets a fresh engine session,
+        # and can't regenerate. Otherwise every anon caller would share one pool and
+        # could continue / regenerate each other's engine sessions.
+        requested_session = (init.get("session_id") or "").strip() or None
+        session_id = None
+        if uid and requested_session and dt_ownership.owns(
+            db, uid, "session", requested_session
+        ):
+            session_id = requested_session
+        if is_regen and not session_id:
+            await websocket.send_json({"type": "error", "content": "无可重新生成的会话"})
+            return
 
         knowledge_bases = None
         if init.get("use_rag"):
             req_kb = init.get("kb_name")
-            kb = tenancy.scope(uid, req_kb) if req_kb else tenancy.scope("curriculum", init.get("stage") or "college")
+            # Anon has no per-user KBs (kb routes require auth) — fall back to the
+            # shared curriculum library, same as solve/solve_ws/learn.
+            kb = tenancy.scope(uid, req_kb) if req_kb and uid else tenancy.scope("curriculum", init.get("stage") or "college")
             knowledge_bases = [kb]
 
         collected = ""
         turn_id: str | None = None
+        engine_session: str | None = None
 
         try:
             async with TurnConnection() as conn:
@@ -141,9 +168,10 @@ async def tutor_stream(websocket: WebSocket):
                     )
 
                 async def pump_engine():
-                    nonlocal turn_id, collected
+                    nonlocal turn_id, collected, engine_session
                     async for ev in conn.events(timeout=180.0):
                         turn_id = ev.get("turn_id") or turn_id
+                        engine_session = ev.get("session_id") or engine_session
                         etype = ev.get("type")
                         content = ev.get("content")
                         # Live-engine contract (verified 2026-06-07): the answer
@@ -160,9 +188,26 @@ async def tutor_stream(websocket: WebSocket):
                         elif etype == "result":
                             if content:
                                 collected = content
-                                await websocket.send_json(ev)
+                                await websocket.send_json(
+                                    {"type": "result", "content": content}
+                                )
+                        elif etype == "tool_result" and str(content or "").startswith(
+                            _ASK_PREFIX
+                        ):
+                            # The live engine's ask_user pause surfaces as a
+                            # tool_result "[awaiting user reply to: <question>]",
+                            # not a top-level ask_user event.
+                            question = str(content)[len(_ASK_PREFIX):].strip().rstrip("]").strip()
+                            await websocket.send_json(
+                                {"type": "ask_user", "content": question}
+                            )
                         elif etype in ("ask_user", "error"):
-                            await websocket.send_json(ev)
+                            # Translate, don't forward raw — engine events carry
+                            # internal fields (metadata/turn_id) and error content
+                            # may include raw exception text.
+                            await websocket.send_json(
+                                {"type": etype, "content": content}
+                            )
 
                 async def pump_app():
                     nonlocal turn_id
@@ -191,13 +236,28 @@ async def tutor_stream(websocket: WebSocket):
             await websocket.send_json({"type": "error", "content": "AI 导师暂时不可用，请稍后再试"})
             return
 
+        # Adopt the engine-assigned session id so the app can continue the
+        # conversation (and regenerate) against it on the next connection.
+        # Authenticated callers only — anon has no stable owner key, so its
+        # sessions stay un-owned (no cross-anon reuse) and ephemeral.
+        if uid and engine_session and engine_session != requested_session:
+            dt_ownership.record(
+                db, uid, "session", engine_session, title=(message or "")[:80]
+            )
+
         if user and collected:
             _archive_solve(db, user, message or "[重新生成]", init.get("stage") or "college",
                            f"tutor:{'regenerate' if is_regen else capability}", {"answer": collected}, None)
         log_event(db, "tutor", uid, {"capability": capability})
         cost_guard.record(message or "", collected)
 
-        await websocket.send_json({"type": "done", "session_id": raw_session})
+        # Hand the session id back only to authenticated callers — anon sessions
+        # are un-owned/ephemeral, so giving anon an id would make the app *look*
+        # multi-turn while the engine starts fresh every message.
+        await websocket.send_json(
+            {"type": "done",
+             "session_id": (engine_session or requested_session) if uid else None}
+        )
     except WebSocketDisconnect:
         pass
     except Exception:
