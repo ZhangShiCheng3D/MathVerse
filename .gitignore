@@ -1,0 +1,19 @@
+﻿# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Build cache
+.swc/
+.codegraph/
+
+# WeChat miniapp private config
+project.private.config.json
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# Node
+node_modules/
